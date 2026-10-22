@@ -868,10 +868,26 @@ function renderAcompanhamento(d) {
       <strong class="codigo-num">${esc(d.codigo_entrega)}</strong>
       <span class="codigo-dica">${d.tipo === 'retirada' ? 'Informe este código no balcão ao retirar seu pedido.' : 'Informe este código ao entregador quando seu pedido chegar.'}</span>
     </div>` : '';
+  /* Motoboy animado (v1.9.8): cena em CSS puro na tela do cliente enquanto o
+     pedido de entrega está ativo; ao sair pra entrega, o vento acelera. */
+  const MOTO_LEGENDAS = {
+    NOVO: 'Pedido confirmado! Nosso motoboy já está aquecendo o motor.',
+    EM_PREPARO: 'Seu açaí está sendo montado — e ele de prontidão.',
+    PRONTO: 'Pedido pronto! Só falta sair pra entrega.',
+    SAIU_ENTREGA: 'Ele já está a caminho da sua casa!',
+  };
+  const motoHTML = (d.tipo === 'entrega' && MOTO_LEGENDAS[d.status]) ? `
+    <div class="moto-cena ${d.status === 'SAIU_ENTREGA' ? 'rapido' : ''}" aria-hidden="true">
+      <span class="moto-vento v1"></span><span class="moto-vento v2"></span><span class="moto-vento v3"></span>
+      <img class="moto-img" src="/img/motoboy.png" alt="">
+      <span class="moto-chao"></span>
+    </div>
+    <p class="moto-legenda">${MOTO_LEGENDAS[d.status]}</p>` : '';
   cont.innerHTML = `
   <div class="acomp-card">
     <div class="acomp-numero">Pedido #${d.numero}</div>
     <p class="acomp-status-txt">${esc(STATUS_TXT[d.status] || d.status)}</p>
+    ${motoHTML}
     ${codigoHTML}
     ${cancelado ? `<div class="cancelado-box">Pedido cancelado${motivoCancel ? ` — ${esc(motivoCancel)}` : ''}.</div>` : timeline}
     ${pagHTML}

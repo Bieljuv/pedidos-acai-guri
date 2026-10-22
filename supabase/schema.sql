@@ -265,7 +265,7 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'pontos' AND column_name = 'id'
-      AND is_identity = 'NO' AND column_default IS NULL
+      AND is_identity = 'NO'
   ) THEN
     CREATE SEQUENCE IF NOT EXISTS pontos_id_seq;
     ALTER TABLE pontos ALTER COLUMN id SET DEFAULT nextval('pontos_id_seq');

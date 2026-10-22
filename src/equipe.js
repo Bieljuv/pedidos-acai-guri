@@ -108,21 +108,23 @@ async function preparar() {
     'ALTER TABLE pontos ADD COLUMN IF NOT EXISTS registrado_em TIMESTAMPTZ DEFAULT now()',
     "ALTER TABLE pontos ADD COLUMN IF NOT EXISTS origem TEXT DEFAULT 'painel'",
     'ALTER TABLE pontos ADD COLUMN IF NOT EXISTS observacao TEXT',
-    // Reparo do `id` sem sequence (v1.9.4): a mesma criação parcial deixou a
-    // tabela `pontos` com `id` BIGINT puro — sem IDENTITY e sem DEFAULT.
-    // Resultado em produção (22/10): as leituras funcionavam (painel e
-    // ponto/hoje normais), mas TODO insert de batida morria com
-    // 'null value in column "id" ... violates not-null constraint' (23502)
-    // e o painel mostrava "Erro interno." ao bater o ponto. Se o id está
-    // sem identity e sem default, criamos a sequence, ligamos o DEFAULT e
-    // sincronizamos o próximo valor pelo maior id existente. Idempotente:
+    // Reparo do `id` sem sequence (v1.9.4, ampliado na v1.9.5): a mesma
+    // criação parcial deixou a tabela `pontos` com `id` BIGINT puro — sem
+    // IDENTITY. Resultado em produção (22/10): as leituras funcionavam
+    // (painel e ponto/hoje normais), mas TODO insert de batida morria
+    // (23502, id nulo) e o painel mostrava "Erro interno." ao bater o
+    // ponto. A v1.9.4 só reparava quando o DEFAULT era nulo; em produção o
+    // erro persistiu (22/10 18:55) — restou algum DEFAULT pendurado
+    // (ex.: nextval de sequence inexistente). A v1.9.5 repara SEMPRE que o
+    // id não for identity: (re)cria a sequence, religa o DEFAULT nela e
+    // sincroniza o próximo valor pelo maior id existente. Idempotente:
     // com identity (instalação normal) o bloco não faz nada.
     `DO $$
     BEGIN
       IF EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'pontos' AND column_name = 'id'
-          AND is_identity = 'NO' AND column_default IS NULL
+          AND is_identity = 'NO'
       ) THEN
         CREATE SEQUENCE IF NOT EXISTS pontos_id_seq;
         ALTER TABLE pontos ALTER COLUMN id SET DEFAULT nextval('pontos_id_seq');

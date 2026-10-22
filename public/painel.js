@@ -1876,7 +1876,11 @@ function iniciarPonto() {
   state.pontoTimer = setInterval(carregarPonto, 30000);
 }
 async function carregarPonto() {
-  if (!state.user || state.user.perfil !== 'funcionario') return;
+  // v1.9.6: quem não é funcionário não tem cartão de ponto — e ele precisa
+  // SUMIR na troca de usuário sem recarregar a página (antes o retorno
+  // seco deixava o cartão do funcionário anterior desenhado na tela do
+  // admin, parecendo que o admin tinha batido ponto).
+  if (!state.user || state.user.perfil !== 'funcionario') { state.ponto = null; renderPonto(); return; }
   try {
     state.ponto = await api('/api/painel/ponto/hoje');
     renderPonto();

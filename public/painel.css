@@ -52,13 +52,13 @@ h3.view-h{margin-bottom:.4rem}
 
 /* ---------- layout ---------- */
 .app{display:flex;min-height:100vh}
-.sidebar{width:252px;flex:none;background:linear-gradient(180deg,var(--deep),var(--night));color:#fff;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.sidebar{width:268px;flex:none;background:linear-gradient(180deg,var(--deep),var(--night));color:#fff;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
 .brand{display:flex;flex-direction:column;gap:.55rem;align-items:flex-start;padding:1rem .9rem;border-bottom:1px solid rgba(255,255,255,.14)}
 .brand img{width:178px;max-width:100%;height:auto;border-radius:14px;object-fit:contain}
 .brand-nome{font-weight:800;font-size:1rem;line-height:1.1}
 .brand-sub{font-size:.75rem;opacity:.75}
-.menu{padding:.7rem .55rem;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
-.menu-item{background:transparent;border:none;color:#f3e4f8;text-align:left;padding:.55rem .65rem;border-radius:9px;font-size:.93rem;font-weight:600;display:flex;align-items:center;gap:.4rem;width:100%}
+.menu{padding:1rem .7rem;display:flex;flex-direction:column;gap:5px;overflow-y:auto}
+.menu-item{background:transparent;border:none;color:#f3e4f8;text-align:left;padding:.78rem .8rem;border-radius:10px;font-size:.95rem;font-weight:600;display:flex;align-items:center;gap:.6rem;width:100%}
 .menu-item:hover{background:rgba(255,255,255,.1)}
 .menu-item.active{background:var(--primary);color:#fff}
 .menu-sub{padding-left:1.7rem;font-size:.88rem;font-weight:500}
@@ -333,7 +333,7 @@ tr.ponto-aberto td{background:#fdf3d8}
 /* Ícones inline: tamanho de texto, alinhados ao meio da linha. */
 .ic{width:1.05rem;height:1.05rem;flex:none;vertical-align:-.18em}
 .ic-lg{width:1.9rem;height:1.9rem}
-.menu-item .ic{width:1.15rem;height:1.15rem}
+.menu-item .ic{width:1.3rem;height:1.3rem}
 .btn .ic{width:1rem;height:1rem}
 .det-obs .ic,.troco-box .ic,.wa-link .ic{margin-right:.25rem}
 .fin-lucro .rot .ic,.rel-card .rot .ic{vertical-align:-.22em}

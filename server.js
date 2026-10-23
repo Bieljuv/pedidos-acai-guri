@@ -857,6 +857,17 @@ app.post('/api/painel/ifood/verificar', auth, soAdmin, h(async (req, res) => {
   try { res.json(await ifood.verificarAgora()); }
   catch (e) { res.status(502).json({ erro: e.message }); }
 }));
+// Vínculo da loja (modelo distribuído, v1.16.0): gera o código que a
+// loja digita no Portal do Parceiro e confirma com o código de
+// autorização que ela recebe lá.
+app.post('/api/painel/ifood/vinculo', auth, soAdmin, h(async (req, res) => {
+  try { res.json(await ifood.gerarVinculo()); }
+  catch (e) { res.status(422).json({ erro: e.message }); }
+}));
+app.post('/api/painel/ifood/confirmar-vinculo', auth, soAdmin, h(async (req, res) => {
+  try { res.json(await ifood.confirmarVinculo((req.body || {}).codigo)); }
+  catch (e) { res.status(422).json({ erro: e.message }); }
+}));
 // Polling do iFood (v1.12.0): a cada 30s, cada loja com a integração
 // ativa busca os eventos e importa os pedidos novos pro painel.
 async function cicloIfood() {

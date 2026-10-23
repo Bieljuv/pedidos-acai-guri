@@ -1,14 +1,21 @@
 'use strict';
-// iFood — seção de configuração da integração (v1.11.3).
+// iFood — integração oficial (revisão de autenticação v1.16.0,
+// conferida na documentação oficial em 23/10/2026).
 //
-// A integração com o iFood é via API oficial e depende de
-// HOMOLOGAÇÃO como integradora: o desenvolvedor cadastra o app no
-// portal do iFood, a loja (merchant) autoriza, e aí o iFood libera
-// Client ID + Client Secret; o Merchant ID é o id da loja lá.
-// Este módulo guarda essas credenciais POR LOJA (segredo mascarado
-// na leitura, igual às outras integrações). A sincronização de
-// pedidos entra quando houver credencial real pra testar — até lá,
-// ligar o interruptor sem credencial é recusado com a explicação.
+// Existem DOIS modelos de app no iFood, e o produto é INTEGRADOR
+// (uma homologação, muitas lojas), então o modelo certo é o
+// DISTRIBUÍDO: as credenciais (Client ID/Secret) são do APP da
+// integradora; cada LOJA autoriza o app no Portal do Parceiro com
+// um código de vínculo (POST /oauth/userCode, vale 10 min) e devolve
+// um código de autorização, que trocamos por access token +
+// REFRESH TOKEN (grantType=authorization_code). O access token
+// expira pelo expiresIn da resposta (referência: 21600s) e é
+// renovado com grantType=refresh_token; refresh vale ~7 dias —
+// expirado, a loja precisa autorizar de novo. Sem refresh token
+// guardado, cai pro fluxo centralizado (client_credentials), que
+// atende apps de uma loja só. Eventos: API de Eventos v1.0
+// (GET /events/v1.0/events:polling + POST /events/acknowledgment),
+// NUNCA sob /order — era o erro da v1.12.0.
 const { get, all, run } = require('./db');
 const { lojaId: lid } = require('./tenant');
 
@@ -21,6 +28,10 @@ async function preparar() {
   for (const sql of [
     'ALTER TABLE config_ifood ADD COLUMN ultima_poll TEXT',
     'ALTER TABLE config_ifood ADD COLUMN total_importados INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE config_ifood ADD COLUMN refresh_token TEXT',
+    'ALTER TABLE config_ifood ADD COLUMN user_code TEXT',
+    'ALTER TABLE config_ifood ADD COLUMN code_verifier TEXT',
+    'ALTER TABLE config_ifood ADD COLUMN user_code_expira TEXT',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_pedidos_origem_externo ON pedidos (loja_id, origem, externo_id) WHERE externo_id IS NOT NULL',
   ]) { try { await run(sql); } catch { /* já existe */ } }
 }
@@ -48,6 +59,10 @@ async function cfgPublica() {
     configurado,
     ultima_poll: c.ultima_poll || null,
     total_importados: Number(c.total_importados || 0),
+    autorizado: !!c.refresh_token,
+    vinculo: (c.user_code && c.user_code_expira && new Date(c.user_code_expira) > new Date())
+      ? { codigo: c.user_code, url: 'https://portal.ifood.com.br/apps/code?c=' + c.user_code, expira_em: c.user_code_expira }
+      : null,
   };
 }
 
@@ -70,7 +85,7 @@ async function salvarCfg(dados = {}) {
 // Uso interno (futura sincronização de pedidos): credenciais reais.
 async function credenciais() {
   const c = await linha();
-  return { client_id: c.client_id, client_secret: c.client_secret, merchant_id: c.merchant_id, ativo: !!c.ativo };
+  return { client_id: c.client_id, client_secret: c.client_secret, merchant_id: c.merchant_id, ativo: !!c.ativo, refresh_token: c.refresh_token || null };
 }
 
 
@@ -86,27 +101,114 @@ const { tx } = require('./db');
 const API_BASE = process.env.IFOOD_API_BASE || 'https://merchant-api.ifood.com.br';
 const tokens = new Map(); // lojaId -> { token, expira }
 
-async function obterToken(lojaId, cred) {
-  const t = tokens.get(lojaId);
-  if (t && t.expira > Date.now() + 30000) return t.token;
+// POST no endpoint de token (os 3 grant types oficiais passam por aqui).
+async function postToken(params) {
   const resp = await fetch(API_BASE + '/authentication/v1.0/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grantType: 'client_credentials', clientId: cred.client_id, clientSecret: cred.client_secret }),
+    body: new URLSearchParams(params),
   });
-  if (!resp.ok) throw new Error('O iFood recusou a autenticação (' + resp.status + '). Confira o Client ID e o Client Secret.');
-  const j = await resp.json();
+  let j = null;
+  try { j = await resp.json(); } catch { /* erro sem corpo */ }
+  if (!resp.ok) {
+    const msg = (j && j.error && j.error.message) || '';
+    const e = new Error('O iFood recusou a autenticação (' + resp.status + ')' + (msg ? ': ' + msg : '') + '. Confira as credenciais do app.');
+    e.status = resp.status;
+    throw e;
+  }
+  return j;
+}
+
+function guardarAccess(lojaId, j) {
+  // A validade vem do expiresIn da resposta — a documentação manda
+  // NUNCA fixar um tempo (a referência fala 21600s, o guia fala 3h).
   tokens.set(lojaId, { token: j.accessToken, expira: Date.now() + Number(j.expiresIn || 3600) * 1000 });
   return j.accessToken;
 }
 
-async function apiIfood(lojaId, cred, metodo, caminho, corpo, headersExtra) {
+async function obterToken(lojaId, cred, forcar = false) {
+  const t = tokens.get(lojaId);
+  if (!forcar && t && t.expira > Date.now() + 60000) return t.token;
+  if (cred.refresh_token) {
+    // Modelo distribuído: renova com o refresh token DESTA loja.
+    let j;
+    try {
+      j = await postToken({ grantType: 'refresh_token', clientId: cred.client_id, clientSecret: cred.client_secret, refreshToken: cred.refresh_token });
+    } catch (e) {
+      // Refresh expirado/revogado (~7 dias): a loja precisa autorizar
+      // de novo. Limpa o guardado pra tela mostrar o estado real.
+      await run('UPDATE config_ifood SET refresh_token=NULL WHERE id=?', lojaId).catch(() => {});
+      tokens.delete(lojaId);
+      const err = new Error('A autorização desta loja no iFood expirou. Gere um novo código de vínculo na configuração do iFood e autorize de novo no Portal do Parceiro.');
+      err.reautorizar = true;
+      throw err;
+    }
+    const novoRefresh = j.refreshToken || j.refresh_token;
+    if (novoRefresh && novoRefresh !== cred.refresh_token) {
+      cred.refresh_token = novoRefresh;
+      await run('UPDATE config_ifood SET refresh_token=? WHERE id=?', novoRefresh, lojaId).catch(() => {});
+    }
+    return guardarAccess(lojaId, j);
+  }
+  // Modelo centralizado (app de uma loja só): sem refresh — token
+  // novo a cada expiração.
+  const j = await postToken({ grantType: 'client_credentials', clientId: cred.client_id, clientSecret: cred.client_secret });
+  return guardarAccess(lojaId, j);
+}
+
+// Passo 1 do vínculo (distribuído): gera o código que a loja digita
+// no Portal do Parceiro. Vale 10 minutos (expiresIn da resposta).
+async function gerarVinculo() {
+  const cred = await credenciais();
+  if (!cred.client_id) throw new Error('Salve o Client ID do app (integradora) antes de gerar o código de vínculo.');
+  const resp = await fetch(API_BASE + '/authentication/v1.0/oauth/userCode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ clientId: cred.client_id }),
+  });
+  let j = null;
+  try { j = await resp.json(); } catch { /* erro sem corpo */ }
+  if (!resp.ok || !j || !j.userCode) throw new Error('O iFood não gerou o código de vínculo (' + resp.status + '). Confira o Client ID do app.');
+  const expira = new Date(Date.now() + Number(j.expiresIn || 600) * 1000);
+  await run('UPDATE config_ifood SET user_code=?, code_verifier=?, user_code_expira=? WHERE id=?',
+    j.userCode, j.authorizationCodeVerifier || null, expira.toISOString(), lid());
+  return { codigo: j.userCode, url: j.verificationUrlComplete || ('https://portal.ifood.com.br/apps/code?c=' + j.userCode), expira_em: expira.toISOString() };
+}
+
+// Passo 2: a loja autorizou no Portal e devolveu o código de
+// autorização (vale ~5 min) — troca por access + refresh token.
+async function confirmarVinculo(codigoAutorizacao) {
+  const c = await linha();
+  if (!c.user_code || !c.code_verifier) throw new Error('Gere o código de vínculo primeiro — sem ele não há o que confirmar.');
+  if (c.user_code_expira && new Date(c.user_code_expira) < new Date()) {
+    throw new Error('O código de vínculo expirou (vale 10 minutos). Gere outro e autorize de novo.');
+  }
+  const code = String(codigoAutorizacao || '').trim();
+  if (!code) throw new Error('Cole o código de autorização que o Portal do Parceiro mostrou pra loja.');
+  const j = await postToken({
+    grantType: 'authorization_code', clientId: c.client_id, clientSecret: c.client_secret,
+    authorizationCode: code, authorizationCodeVerifier: c.code_verifier,
+  });
+  const refresh = j.refreshToken || j.refresh_token || null;
+  if (!refresh) throw new Error('O iFood não devolveu o token de renovação. Confira se o app está cadastrado como DISTRIBUÍDO no Portal do Desenvolvedor e tente de novo.');
+  await run('UPDATE config_ifood SET refresh_token=?, user_code=NULL, code_verifier=NULL, user_code_expira=NULL WHERE id=?', refresh, lid());
+  guardarAccess(lid(), j);
+  return cfgPublica();
+}
+
+async function apiIfood(lojaId, cred, metodo, caminho, corpo, headersExtra, tentativa = 0) {
   const token = await obterToken(lojaId, cred);
   const resp = await fetch(API_BASE + caminho, {
     method: metodo,
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', ...(headersExtra || {}) },
     body: corpo ? JSON.stringify(corpo) : undefined,
   });
+  // A documentação manda: recebeu 401, peça um token novo e tente de
+  // novo (o token pode ter sido revogado/expirado antes do previsto).
+  if (resp.status === 401 && tentativa === 0) {
+    tokens.delete(lojaId);
+    return apiIfood(lojaId, cred, metodo, caminho, corpo, headersExtra, 1);
+  }
   let json = null;
   try { json = await resp.json(); } catch { /* respostas 202/204 sem corpo */ }
   return { status: resp.status, json };
@@ -198,7 +300,13 @@ async function verificarAgora() {
     return { ok: false, motivo: 'Integração desligada ou faltando credencial (Client ID, Client Secret e Merchant ID).' };
   }
   const lojaId = lid();
-  const ev = await apiIfood(lojaId, cred, 'GET', '/order/v1.0/events:polling', null, { 'x-polling-merchants': cred.merchant_id });
+  // API de EVENTOS v1.0 (base /events/v1.0) — a v1.12.0 chamava sob
+  // /order e nunca receberia nada. 204 = nenhum evento pendente.
+  const ev = await apiIfood(lojaId, cred, 'GET', '/events/v1.0/events:polling', null, { 'x-polling-merchants': cred.merchant_id });
+  if (ev.status === 204) {
+    await run("UPDATE config_ifood SET ultima_poll=datetime('now') WHERE id=?", lojaId);
+    return { ok: true, eventos: 0, importados: 0 };
+  }
   if (ev.status !== 200) throw new Error('O iFood respondeu ' + ev.status + ' ao buscar os eventos.');
   const eventos = Array.isArray(ev.json) ? ev.json : [];
   let importados = 0;
@@ -214,7 +322,7 @@ async function verificarAgora() {
     }
   }
   if (ids.length) {
-    await apiIfood(lojaId, cred, 'POST', '/order/v1.0/events/acknowledgment', ids.map((id) => ({ id }))).catch(() => {});
+    await apiIfood(lojaId, cred, 'POST', '/events/v1.0/events/acknowledgment', ids.map((id) => ({ id }))).catch(() => {});
   }
   await run("UPDATE config_ifood SET ultima_poll=datetime('now'), total_importados = total_importados + ? WHERE id=?", importados, lojaId);
   return { ok: true, eventos: eventos.length, importados };
@@ -241,4 +349,4 @@ async function aoMudarStatus(pedido, para) {
   } catch (e) { console.error('[ifood] aoMudarStatus:', e.message); }
 }
 
-module.exports = { preparar, cfgPublica, salvarCfg, credenciais, verificarAgora, lojasAtivas, aoMudarStatus };
+module.exports = { preparar, cfgPublica, salvarCfg, credenciais, verificarAgora, lojasAtivas, aoMudarStatus, gerarVinculo, confirmarVinculo };

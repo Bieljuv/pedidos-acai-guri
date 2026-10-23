@@ -2511,7 +2511,37 @@ function preencherCfgIfood(c) {
   if (st) st.textContent = c.total_importados
     ? `Já entraram ${c.total_importados} pedido(s) do iFood por aqui.` + (c.ultima_poll ? ` Última verificação: ${String(c.ultima_poll).slice(0, 16).replace('T', ' ')}.` : '')
     : 'Nenhum pedido do iFood entrou ainda. Com a integração ativa, o sistema verifica sozinho a cada 30 segundos.';
+  // Estado da autorização da loja (modelo distribuído, v1.16.0).
+  const aut = $('#ifoodAutStatus');
+  if (aut) aut.textContent = c.autorizado
+    ? 'Loja AUTORIZADA no iFood — o sistema renova o acesso sozinho. Se um dia ele avisar que expirou, gere um código novo e autorize de novo.'
+    : 'Loja ainda NÃO autorizada. Sem a autorização abaixo, o iFood não libera os pedidos desta loja.';
+  const info = $('#ifoodVinculoInfo');
+  if (info) {
+    if (c.vinculo) {
+      info.classList.remove('hidden');
+      $('#ifoodUserCode').textContent = c.vinculo.codigo;
+      const a = $('#ifoodUserUrl');
+      a.href = c.vinculo.url; a.textContent = c.vinculo.url;
+    } else info.classList.add('hidden');
+  }
 }
+$('#btnIfoodVinculo')?.addEventListener('click', async () => {
+  try {
+    const r = await api('/api/painel/ifood/vinculo', { method: 'POST', body: {} });
+    toast('Código gerado — vale 10 minutos. A loja autoriza no Portal do Parceiro e te passa o código de autorização.');
+    carregarCfgIfood();
+    if (r && r.url) window.open(r.url, '_blank', 'noopener');
+  } catch (err) { toast(err.message, true); }
+});
+$('#btnIfoodConfirmar')?.addEventListener('click', async () => {
+  try {
+    const r = await api('/api/painel/ifood/confirmar-vinculo', { method: 'POST', body: { codigo: $('#ifoodAuthCode').value } });
+    $('#ifoodAuthCode').value = '';
+    preencherCfgIfood(r);
+    toast('Loja autorizada no iFood! A integração já pode receber pedidos.');
+  } catch (err) { toast(err.message, true); }
+});
 async function carregarCfgIfood() {
   try { preencherCfgIfood(await api('/api/painel/ifood/config')); } catch { /* silencioso */ }
 }

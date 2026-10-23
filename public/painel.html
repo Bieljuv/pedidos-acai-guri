@@ -915,6 +915,28 @@
           <label>Merchant ID (o ID da sua loja no iFood)
             <input type="text" id="cfgIfoodMerchantId" placeholder="Ex.: 00000000-0000-0000-0000-000000000000" autocomplete="off">
           </label>
+          <div class="bloco-vinculo" id="ifoodVinculoBox">
+            <strong>Autorização da loja (vínculo)</strong>
+            <p class="campo-dica" id="ifoodAutStatus">Verificando a autorização…</p>
+            <ol class="passos-vinculo">
+              <li>Clique em <strong>Gerar código de vínculo</strong> (vale 10 minutos).</li>
+              <li>A loja entra no <strong>Portal do Parceiro do iFood</strong> pelo link que aparece, digita o código e autoriza o app.</li>
+              <li>O Portal mostra um <strong>código de autorização</strong> — cole ele aqui e clique em Confirmar. Pronto: a loja fica autorizada e o sistema renova o acesso sozinho (a autorização dura ~7 dias renováveis).</li>
+            </ol>
+            <div class="form-actions">
+              <button type="button" class="btn btn-ghost" id="btnIfoodVinculo">Gerar código de vínculo</button>
+            </div>
+            <div id="ifoodVinculoInfo" class="hidden">
+              <p class="campo-dica">Código da loja: <strong id="ifoodUserCode" style="font-size:1.05rem"></strong><br>
+              Link direto: <a id="ifoodUserUrl" href="#" target="_blank" rel="noopener"></a></p>
+              <label>Código de autorização que o Portal mostrou
+                <input type="text" id="ifoodAuthCode" placeholder="Cole aqui o código de autorização" autocomplete="off">
+              </label>
+              <div class="form-actions">
+                <button type="button" class="btn btn-primary" id="btnIfoodConfirmar">Confirmar autorização</button>
+              </div>
+            </div>
+          </div>
           <p class="campo-dica" id="cfgIfoodStats">Nenhum pedido do iFood entrou ainda.</p>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary">Salvar iFood</button>

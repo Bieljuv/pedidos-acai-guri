@@ -20,6 +20,8 @@ h3.view-h{margin-bottom:.4rem}
 /* ---------- botões ---------- */
 .btn{border:1px solid transparent;border-radius:9px;padding:.5rem 1rem;font-size:.9rem;font-weight:600;background:#eee;color:var(--ink);display:inline-flex;align-items:center;gap:.35rem;justify-content:center}
 .btn-sm{padding:.32rem .7rem;font-size:.82rem}
+.btn-whats{background:#25D366;color:#fff}
+.btn-whats:hover{background:#1eb85a;color:#fff}
 .btn-block{width:100%}
 .btn-primary{background:var(--primary);color:#fff}
 .btn-primary:hover{background:var(--primary-hover)}

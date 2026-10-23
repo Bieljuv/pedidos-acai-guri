@@ -19,6 +19,9 @@ const equipe = require('./src/equipe');
 const entregadores = require('./src/entregadores');
 const ifood = require('./src/ifood');
 const fidelidade = require('./src/fidelidade');
+const cupons = require('./src/cupons');
+const recuperador = require('./src/recuperador');
+const whatsRobo = require('./src/whats-robo');
 const pushPainel = require('./src/push');
 const recuperacao = require('./src/recuperacao');
 const notif = require('./src/notificacoes');
@@ -45,7 +48,7 @@ app.use((req, res, next) => {
 // notificações). TODA rota /api aguarda essa promise — no SQLite é imediata;
 // no Postgres (Supabase) é o que garante schema conferido e seed aplicado
 // antes da primeira resposta. Se rejeitar, a API responde 500 com a causa.
-const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await ifood.preparar(); await fidelidade.preparar(); await pushPainel.preparar(); await recuperacao.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
+const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await ifood.preparar(); await fidelidade.preparar(); await cupons.preparar(); await recuperador.preparar(); recuperador.iniciar(); await whatsRobo.preparar(); await pushPainel.preparar(); await recuperacao.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
 pronto.catch((e) => console.error('[banco]', e.message));
 app.use('/api', async (req, res, next) => {
   try { await pronto; next(); }
@@ -165,7 +168,7 @@ app.get('/api/public/loja', h(async (req, res) => {
   const pixCfg = await pagamentos.getConfig('pix_presencial');
   const chavePix = (pixCfg && pixCfg.extra && pixCfg.extra.chave_pix) || loja.chave_pix || '';
   res.json({
-    id: loja.id, nome: loja.nome, logo_url: loja.logo_url, capa_url: loja.capa_url,
+    id: loja.id, nome: loja.nome, logo_url: loja.logo_url, capa_url: loja.capa_url, capa_foco: loja.capa_foco || 'centro',
     whatsapp: loja.whatsapp, instagram: loja.instagram, endereco_texto: loja.endereco_texto,
     documento: loja.documento || null,
     cor_primaria: loja.cor_primaria || null, cor_destaque: loja.cor_destaque || null,
@@ -213,6 +216,11 @@ app.get('/api/public/pedidos/:token', h(async (req, res) => {
 
 // Fidelidade pública (checkout): o cliente digita o próprio número e o
 // sistema reconhece. Resposta mínima: contagem, meta e prêmio aguardando.
+app.get('/api/public/ultimo-pedido/:whatsapp', h(async (req, res) => {
+  const r = await pedidosCore.ultimoPedidoDoCliente(req.params.whatsapp);
+  if (!r) return res.json({ itens: [] });
+  res.json(r);
+}));
 app.get('/api/public/fidelidade/:whatsapp', h(async (req, res) => {
   // Freio contra varredura de números (v1.9.28): 30 consultas/min por IP.
   if (!limite.permitido('fid:' + limite.ipDe(req), 30, 60 * 1000)) {
@@ -247,6 +255,46 @@ app.post('/api/webhooks/telegram', async (req, res) => {
     return res.status(403).json({ ok: false });
   }
   try { await notif.tratarUpdateTelegram(req.body || {}); } catch (e) { console.error('[webhook telegram]', e.message); }
+  res.status(200).json({ ok: true });
+});
+// Webhook da Evolution (v1.15.0): mensagem chegando no WhatsApp da loja.
+// A loja dona é resolvida pela INSTÂNCIA (cada loja tem a sua); se a
+// Evolution mandar o header apikey, ele precisa bater com o da loja.
+// Payload que não é mensagem de texto de um cliente (grupo, status, o
+// próprio número) é ignorado com 200 — webhook nunca responde 500.
+app.post('/api/webhooks/whatsapp', async (req, res) => {
+  res.status(200).json({ ok: true });
+  try {
+    const b = req.body || {};
+    const evento = String(b.event || '');
+    if (!evento.includes('messages.upsert')) return;
+    const dono = await whatsRobo.lojaDaInstancia(b.instance);
+    if (!dono) return;
+    if (req.headers.apikey && dono.evolution_apikey && req.headers.apikey !== dono.evolution_apikey) return;
+    const d = Array.isArray(b.data) ? b.data[0] : b.data;
+    if (!d || !d.key) return;
+    if (d.key.fromMe) return;
+    const jid = String(d.key.remoteJid || '');
+    if (!jid.endsWith('@s.whatsapp.net')) return;
+    const msg = d.message || {};
+    const texto = msg.conversation || (msg.extendedTextMessage && msg.extendedTextMessage.text) || '';
+    await tenant.como(dono.loja_id, async () => {
+      await whatsRobo.preparar();
+      await notif.preparar();
+      await whatsRobo.tratarMensagem({ de: jid.replace('@s.whatsapp.net', ''), texto, nome: d.pushName || '', host: req.headers.host });
+    });
+  } catch (e) { console.error('[webhook whatsapp]', e.message); }
+});
+// Config do robô (painel).
+app.get('/api/painel/whats-robo/config', auth, soAdmin, h(async (req, res) => {
+  res.json(await whatsRobo.getConfig());
+}));
+app.put('/api/painel/whats-robo/config', auth, soAdmin, h(async (req, res) => {
+  res.json(await whatsRobo.salvarConfig(req.body || {}));
+}));
+// Webhook do Asaas da PLATAFORMA (v1.10.0): a mensalidade das lojas caindo.
+app.post('/api/webhooks/plataforma-asaas', async (req, res) => {
+  try { await plataforma.webhookAsaasPlataforma(req.body || {}, req.headers); } catch (e) { console.error('[webhook plataforma]', e.message); }
   res.status(200).json({ ok: true });
 });
 // Webhook da 99 (v1.9.2): a entrega mudou de estado lá. Público (sem sessão);
@@ -498,7 +546,7 @@ app.post('/api/painel/upload', auth, soAdmin, upload.single('arquivo'), async (r
 // ---------------- Painel: loja ----------------
 app.get('/api/painel/loja', auth, h(async (req, res) => res.json(await pedidosCore.getLoja())));
 app.patch('/api/painel/loja', auth, soAdmin, h(async (req, res) => {
-  const campos = ['nome', 'logo_url', 'capa_url', 'whatsapp', 'instagram', 'endereco_texto', 'tempo_preparo_min', 'tempo_entrega_min', 'pedido_minimo_centavos', 'taxa_unica_centavos', 'chave_pix', 'documento', 'email_pedidos', 'aberta_manual', 'horario_abre', 'horario_fecha', 'som_pedido', 'cor_primaria', 'cor_destaque'];
+  const campos = ['nome', 'logo_url', 'capa_url', 'whatsapp', 'instagram', 'endereco_texto', 'tempo_preparo_min', 'tempo_entrega_min', 'pedido_minimo_centavos', 'taxa_unica_centavos', 'chave_pix', 'documento', 'email_pedidos', 'aberta_manual', 'horario_abre', 'horario_fecha', 'som_pedido', 'cor_primaria', 'cor_destaque', 'capa_foco'];
   const corpo = req.body || {};
   // documento guarda só os dígitos (a máscara é aplicada na exibição)
   if (corpo.documento !== undefined) corpo.documento = String(corpo.documento || '').replace(/\D/g, '').slice(0, 14) || null;
@@ -747,6 +795,36 @@ app.post('/api/painel/fidelidade/sorteios', auth, soAdmin, h(async (req, res) =>
   const r = await fidelidade.sortear(req.body || {});
   if (!r.ok) return res.status(422).json({ erro: r.erro });
   res.json(r);
+}));
+app.get('/api/painel/cupons', auth, soAdmin, h(async (req, res) => {
+  res.json({ cupons: await cupons.listar() });
+}));
+app.post('/api/painel/cupons', auth, soAdmin, h(async (req, res) => {
+  const r = await cupons.criar(req.body || {});
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
+  res.status(201).json(r);
+}));
+app.put('/api/painel/cupons/:id/ativo', auth, soAdmin, h(async (req, res) => {
+  res.json(await cupons.definirAtivo(Number(req.params.id), !!(req.body || {}).ativo));
+}));
+app.delete('/api/painel/cupons/:id', auth, soAdmin, h(async (req, res) => {
+  res.json(await cupons.remover(Number(req.params.id)));
+}));
+app.get('/api/painel/recuperador', auth, soAdmin, h(async (req, res) => {
+  res.json({ config: await recuperador.getConfig(), pendentes: await recuperador.pendentes() });
+}));
+app.put('/api/painel/recuperador/config', auth, soAdmin, h(async (req, res) => {
+  res.json(await recuperador.salvarConfig(req.body || {}));
+}));
+app.post('/api/public/intencao', h(async (req, res) => {
+  const r = await recuperador.registrar(req.body || {});
+  res.json(r);
+}));
+app.post('/api/public/cupom/validar', h(async (req, res) => {
+  const b = req.body || {};
+  const v = await cupons.validar(b.codigo, Math.max(0, Math.round(Number(b.subtotal_centavos) || 0)));
+  if (!v.ok) return res.status(422).json({ erro: v.erro });
+  res.json({ ok: true, codigo: v.cupom.codigo, tipo: v.cupom.tipo, valor: Number(v.cupom.valor), desconto_centavos: v.desconto });
 }));
 app.put('/api/painel/fidelidade/config', auth, soAdmin, h(async (req, res) => {
   res.json(await fidelidade.salvarConfig(req.body || {}));

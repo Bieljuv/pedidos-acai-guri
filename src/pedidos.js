@@ -5,6 +5,8 @@ const { tokenAleatorio, normalizaFone, lojaEstaAberta } = require('./util');
 const notif = require('./notificacoes');
 const eventos = require('./eventos');
 const fidelidade = require('./fidelidade');
+const cupons = require('./cupons');
+const recuperador = require('./recuperador');
 const pushPainel = require('./push');
 
 const TRANSICOES = {
@@ -106,6 +108,22 @@ async function precificarItem(item) {
   return { produto, quantidade, unit, subtotal: unit * quantidade, snapshot };
 }
 
+// Peça de novo (v1.14.0): último pedido não cancelado do cliente, com os
+// itens e as opções (grupo/opção por NOME — a loja reconstrói o carrinho
+// casando com o cardápio atual; o que saiu do cardápio é ignorado lá).
+async function ultimoPedidoDoCliente(whatsapp) {
+  const w = normalizaFone(whatsapp);
+  if (!w || w.length < 12) return null;
+  const p = await get(`SELECT id, numero FROM pedidos WHERE loja_id=${lid()} AND cliente_whatsapp=? AND status<>'CANCELADO' ORDER BY id DESC LIMIT 1`, w);
+  if (!p) return null;
+  const itens = await all('SELECT id, produto_id, nome_snapshot, quantidade, observacao FROM pedido_itens WHERE pedido_id=? ORDER BY id', p.id);
+  for (const it of itens) {
+    it.opcoes = await all('SELECT grupo_nome, opcao_nome FROM pedido_item_opcoes WHERE pedido_item_id=? ORDER BY id', it.id);
+    delete it.id;
+  }
+  return { numero: p.numero, itens };
+}
+
 async function criarPedido(corpo) {
   const loja = await getLoja();
   const estado = lojaEstaAberta(loja);
@@ -158,10 +176,19 @@ async function criarPedido(corpo) {
   const itensCalc = [];
   for (const item of corpo.itens) itensCalc.push(await precificarItem(item));
   const subtotal = itensCalc.reduce((s, i) => s + i.subtotal, 0);
+  // Cupom (v1.14.0): validado AQUI com o subtotal real — o que o checkout
+  // mostrou era só uma prévia. Desconto cai sobre o subtotal, nunca na taxa.
+  let cupomCodigo = null, desconto = 0;
+  if (corpo.cupom_codigo) {
+    const v = await cupons.validar(corpo.cupom_codigo, subtotal);
+    if (!v.ok) throw new Error(v.erro);
+    cupomCodigo = v.cupom.codigo;
+    desconto = v.desconto;
+  }
   if (loja.pedido_minimo_centavos > 0 && subtotal < loja.pedido_minimo_centavos) {
     throw new Error(`O pedido mínimo é de R$ ${(loja.pedido_minimo_centavos / 100).toFixed(2).replace('.', ',')}.`);
   }
-  const total = subtotal + taxa;
+  const total = subtotal - desconto + taxa;
 
   const forma = String(corpo.forma_pagamento || 'dinheiro');
   const metodo = String(corpo.metodo_pagamento || forma); // pix|cartao|dinheiro|pix_mp|cartao_mp|pix_asaas|cartao_asaas
@@ -177,10 +204,10 @@ async function criarPedido(corpo) {
   let pedidoId;
   await tx(async (q) => {
     const info = await q.run(`INSERT INTO pedidos (loja_id, numero, token, cliente_nome, cliente_whatsapp, tipo, bairro_id, bairro_nome,
-      endereco_json, forma_pagamento, metodo_pagamento, troco_para_centavos, observacao, subtotal_centavos, taxa_entrega_centavos, total_centavos, codigo_entrega)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, numero, token, nome, whats, tipo, corpo.bairro_id || null, bairroNome,
+      endereco_json, forma_pagamento, metodo_pagamento, troco_para_centavos, observacao, subtotal_centavos, taxa_entrega_centavos, total_centavos, codigo_entrega, cupom_codigo, desconto_centavos)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, numero, token, nome, whats, tipo, corpo.bairro_id || null, bairroNome,
         tipo === 'entrega' ? JSON.stringify(corpo.endereco) : null,
-        forma, metodo, troco, corpo.observacao || null, subtotal, taxa, total, codigoEntrega);
+        forma, metodo, troco, corpo.observacao || null, subtotal, taxa, total, codigoEntrega, cupomCodigo, desconto);
     pedidoId = Number(info.lastInsertRowid);
     for (const it of itensCalc) {
       const ii = await q.run('INSERT INTO pedido_itens (pedido_id, produto_id, nome_snapshot, preco_unitario_centavos, quantidade, subtotal_centavos, observacao) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -200,6 +227,8 @@ async function criarPedido(corpo) {
 
   const pedido = await getPedido(pedidoId);
   const itens = await getItensPedido(pedidoId);
+  // Recuperador (v1.14.0): comprou = intenção convertida, sai da lista.
+  try { await recuperador.marcarConvertido(whats, pedidoId); } catch { /* nunca trava */ }
   if (premioFidelidadeId) {
     try { await fidelidade.consumirPremio(premioFidelidadeId, pedidoId); } catch { /* idem */ }
   }
@@ -307,4 +336,4 @@ async function preparar() {
   }
 }
 
-module.exports = { getLoja, montarCardapio, criarPedido, getPedido, getItensPedido, detalhePedido, transicionar, TRANSICOES, preparar };
+module.exports = { getLoja, montarCardapio, criarPedido, getPedido, getItensPedido, detalhePedido, transicionar, TRANSICOES, preparar, ultimoPedidoDoCliente };

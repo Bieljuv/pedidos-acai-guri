@@ -34,7 +34,7 @@
 <!-- ===== Visão da loja ===== -->
 <div id="view-loja">
   <section class="hero">
-    <img id="hero-capa" class="hero-capa" alt="" hidden>
+    <img id="hero-capa" class="hero-capa" alt="" fetchpriority="high" decoding="async">
     <img id="hero-logo" class="hero-logo" alt="Logo da loja" hidden>
     <h1 id="hero-nome">Açaí do Guri</h1>
     <p id="hero-status" class="hero-status"></p>
@@ -46,6 +46,20 @@
   </section>
 
   <div id="banner-fechada" class="banner-fechada" hidden></div>
+
+  <section id="peca-de-novo" class="peca-de-novo" hidden>
+    <div class="pdn-texto">
+      <strong>🔁 Peça de novo</strong>
+      <span id="pdn-resumo">Já pediu aqui? A gente remonta seu último pedido em 1 toque.</span>
+    </div>
+    <button type="button" class="btn-primario" id="btn-peca-de-novo" hidden>Pedir de novo</button>
+    <button type="button" class="btn-primario" id="btn-pdn-buscar">Buscar meu pedido</button>
+    <form id="pdn-form" class="pdn-form" hidden>
+      <input id="pdn-fone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="Seu WhatsApp com DDD" maxlength="15">
+      <button type="submit" class="btn-primario">Buscar</button>
+    </form>
+    <p id="pdn-msg" class="cupom-msg erro" hidden></p>
+  </section>
 
   <main class="conteudo">
     <div class="busca-wrap">
@@ -187,9 +201,15 @@
         <input id="ck-obs" type="text" maxlength="200" placeholder="Algum recado pra gente? (opcional)">
       </label>
 
+      <div class="cupom-row">
+        <input id="ck-cupom" type="text" maxlength="24" placeholder="Cupom de desconto" autocomplete="off">
+        <button type="button" class="btn-secundario" id="btn-cupom">Aplicar</button>
+      </div>
+      <p id="ck-cupom-msg" class="cupom-msg" hidden></p>
       <div class="resumo">
         <div class="resumo-linha"><span>Subtotal</span><span id="rs-subtotal">R$ 0,00</span></div>
         <div class="resumo-linha"><span>Taxa de entrega</span><span id="rs-taxa">—</span></div>
+        <div class="resumo-linha" id="rs-desconto-linha" hidden><span>Desconto (<strong id="rs-cupom-codigo"></strong>)</span><span id="rs-desconto">—</span></div>
         <div class="resumo-linha resumo-total"><span>TOTAL</span><strong id="rs-total">R$ 0,00</strong></div>
         <p id="rs-minimo" class="rs-minimo" hidden></p>
       </div>

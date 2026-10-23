@@ -82,6 +82,96 @@ const subtotalCarrinho = () =>
   carrinho.reduce((s, i) => s + i.preco_unitario_centavos * i.quantidade, 0);
 const qtdCarrinho = () => carrinho.reduce((s, i) => s + i.quantidade, 0);
 
+/* ---------- Peça de novo (v1.14.0): cliente reconhecido pelo aparelho ---------- */
+let ultimoPedidoCache = null;
+function mostrarPecaDeNovo(r) {
+  ultimoPedidoCache = r;
+  $('#pdn-resumo').textContent = 'Seu último pedido: ' +
+    r.itens.map(i => `${i.quantidade}× ${i.nome_snapshot}`).join(', ');
+  $('#btn-peca-de-novo').hidden = false;
+  $('#btn-pdn-buscar').hidden = true;
+  $('#pdn-form').hidden = true;
+  $('#pdn-msg').hidden = true;
+  $('#peca-de-novo').hidden = false;
+}
+async function verificarPecaDeNovo() {
+  if (comprasBloqueadas()) return;
+  let salvo = {};
+  try { salvo = JSON.parse(localStorage.getItem('loja_cliente') || '{}'); } catch {}
+  if (salvo.whatsapp) {
+    try {
+      const r = await getJSON('/api/public/ultimo-pedido/' + soDigitos(salvo.whatsapp));
+      if (r && r.itens && r.itens.length) { mostrarPecaDeNovo(r); return; }
+    } catch { /* cai pra busca manual */ }
+  }
+  // Sem reconhecimento pelo aparelho: oferece a busca pelo WhatsApp —
+  // funciona em qualquer celular (v1.14.1, pedido do Gabriel).
+  $('#peca-de-novo').hidden = false;
+}
+$('#btn-pdn-buscar').addEventListener('click', () => {
+  $('#pdn-form').hidden = false;
+  $('#btn-pdn-buscar').hidden = true;
+  $('#pdn-fone').focus();
+});
+$('#pdn-fone').addEventListener('input', (e) => { e.target.value = mascararFone(e.target.value); });
+$('#pdn-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const digitos = soDigitos($('#pdn-fone').value);
+  const msg = $('#pdn-msg');
+  if (digitos.length < 10) { msg.textContent = 'Digite seu WhatsApp com DDD.'; msg.hidden = false; return; }
+  msg.hidden = true;
+  try {
+    const r = await getJSON('/api/public/ultimo-pedido/' + digitos);
+    if (!r || !r.itens || !r.itens.length) {
+      msg.textContent = 'Não achei pedido nesse número por aqui. Confere o número?';
+      msg.hidden = false;
+      return;
+    }
+    // Guarda o número neste aparelho: das próximas vezes reconhece sozinho.
+    let salvo = {};
+    try { salvo = JSON.parse(localStorage.getItem('loja_cliente') || '{}'); } catch {}
+    salvo.whatsapp = digitos;
+    try { localStorage.setItem('loja_cliente', JSON.stringify(salvo)); } catch {}
+    mostrarPecaDeNovo(r);
+  } catch {
+    msg.textContent = 'Não consegui buscar agora. Tenta de novo em instantes.';
+    msg.hidden = false;
+  }
+});
+$('#btn-peca-de-novo').addEventListener('click', () => {
+  if (!ultimoPedidoCache) return;
+  let adicionados = 0, pulados = 0;
+  for (const it of ultimoPedidoCache.itens) {
+    const produto = produtosPorId.get(it.produto_id);
+    if (!produto || produto.esgotado) { pulados++; continue; }
+    const ids = [];
+    for (const op of (it.opcoes || [])) {
+      const g = (produto.grupos || []).find(g => g.nome === op.grupo_nome);
+      const o = g && (g.opcoes || []).find(o => o.nome === op.opcao_nome && !o.esgotada);
+      if (o) ids.push(o.id);
+    }
+    const faltaObrigatorio = (produto.grupos || []).some(g =>
+      (g.obrigatorio || (g.minimo || 0) > 0) && !ids.some(id => (g.opcoes || []).some(o => o.id === id)));
+    if (faltaObrigatorio) { pulados++; continue; }
+    const sel = new Set(ids);
+    const item = {
+      produto_id: produto.id, nome: produto.nome, foto_url: produto.foto_url || '', tipo: produto.tipo,
+      quantidade: it.quantidade, observacao: it.observacao || '', opcoes: ids,
+      resumoLinhas: resumoDoItem(produto, sel), preco_unitario_centavos: calcularUnitario(produto, sel),
+    };
+    const igual = carrinho.findIndex(i =>
+      i.produto_id === item.produto_id && i.observacao === item.observacao &&
+      JSON.stringify(i.opcoes.slice().sort()) === JSON.stringify(item.opcoes.slice().sort()));
+    if (igual >= 0) carrinho[igual].quantidade += item.quantidade;
+    else carrinho.push(item);
+    adicionados++;
+  }
+  if (!adicionados) { toast('Os itens do último pedido não estão mais disponíveis.'); return; }
+  salvarCarrinho();
+  abrirCarrinho();
+  toast(pulados ? 'Pedido montado — alguns itens não estão mais no cardápio e ficaram de fora.' : 'Seu pedido de sempre está no carrinho!');
+});
+
 /* ---------- cabeçalho: transição de cor dirigida pela rolagem ---------- */
 const hdr = $('#hdr');
 const reduzMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -202,6 +292,7 @@ async function iniciar() {
     renderLoja();
     renderCardapio();
     renderBarraCarrinho();
+    verificarPecaDeNovo();
   } catch (e) {
     $('#hero-status').textContent = 'Não foi possível carregar a loja agora. Verifique sua conexão e recarregue a página.';
     $('#hero-status').className = 'hero-status fechada';
@@ -241,11 +332,16 @@ function renderLoja() {
   $('#hero-nome').textContent = loja.nome;
   if (loja.logo_url) {
     const gl = $('#hero-logo'); gl.src = loja.logo_url; gl.hidden = false;
-  const capa = $('#hero-capa');
-  if (loja.capa_url) { capa.src = loja.capa_url; capa.hidden = false; document.querySelector('.hero').classList.add('com-capa'); }
-  else { capa.hidden = true; document.querySelector('.hero').classList.remove('com-capa'); }
-  faviconDaLoja(loja.logo_url, loja.cor_primaria);
+    faviconDaLoja(loja.logo_url, loja.cor_primaria);
   }
+  // Capa (v1.15.1): fora do if da logo (loja com capa e sem logo não exibia
+  // a capa) e com a classe do FOCO que o dono escolheu pro celular.
+  const capa = $('#hero-capa');
+  const heroEl = document.querySelector('.hero');
+  capa.classList.remove('foco-esquerda', 'foco-direita');
+  if (loja.capa_foco === 'esquerda' || loja.capa_foco === 'direita') capa.classList.add('foco-' + loja.capa_foco);
+  if (loja.capa_url) { capa.src = loja.capa_url; heroEl.classList.add('com-capa'); }
+  else { capa.removeAttribute('src'); heroEl.classList.remove('com-capa'); }
   const aberta = !!loja.aberta && !loja.pausada;
   const hs = $('#hdr-status');
   hs.textContent = loja.pausada ? 'Pausada' : (aberta ? 'Aberta' : 'Fechada');
@@ -340,7 +436,7 @@ function cardProduto(p) {
     ? `<span class="apartir">a partir de</span> ${R$(min)}`
     : R$(min);
   const foto = p.foto_url
-    ? `<img class="cp-foto" src="${esc(p.foto_url)}" alt="" loading="lazy">`
+    ? `<img class="cp-foto" src="${esc(p.foto_url)}" alt="" loading="lazy" decoding="async">`
     : `<div class="cp-foto-vazia" aria-hidden="true">${icLoja('tigela')}</div>`;
   const selos = [
     p.destaque ? `<span class="selo selo-destaque">${icLoja('estrela')} Mais pedido</span>` : '',
@@ -681,14 +777,70 @@ function taxaAtual() {
   if (!bairros.length && loja && loja.taxa_unica_centavos != null) return loja.taxa_unica_centavos;
   return null; // ainda não dá para calcular
 }
+/* Cupom (v1.14.0): a prévia usa tipo/valor que o SERVIDOR devolveu na
+   validação; o desconto oficial é recalculado no servidor ao criar o pedido. */
+let cupomAplicado = null; // {codigo, tipo, valor}
+function descontoCupom(sub) {
+  if (!cupomAplicado) return 0;
+  const d = cupomAplicado.tipo === 'percentual'
+    ? Math.floor(sub * Math.min(100, cupomAplicado.valor) / 100)
+    : Math.min(cupomAplicado.valor, sub);
+  return Math.max(0, Math.min(d, sub));
+}
+async function aplicarCupom(silencioso) {
+  const codigo = $('#ck-cupom').value.trim();
+  const msg = $('#ck-cupom-msg');
+  if (!codigo) { cupomAplicado = null; msg.hidden = true; atualizarResumoCheckout(); return; }
+  try {
+    const r = await fetch('/api/public/cupom/validar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codigo, subtotal_centavos: subtotalCarrinho() }),
+    }).then(x => x.json());
+    if (!r.ok) throw new Error(r.erro || 'Cupom inválido.');
+    cupomAplicado = { codigo: r.codigo, tipo: r.tipo, valor: r.valor };
+    msg.textContent = `Cupom ${r.codigo} aplicado: -${R$(r.desconto_centavos)} neste pedido.`;
+    msg.className = 'cupom-msg ok'; msg.hidden = false;
+  } catch (e) {
+    cupomAplicado = null;
+    if (!silencioso) { msg.textContent = e.message; msg.className = 'cupom-msg erro'; msg.hidden = false; }
+    else msg.hidden = true;
+  }
+  atualizarResumoCheckout();
+}
+$('#btn-cupom').addEventListener('click', () => aplicarCupom(false));
+/* Recuperador (v1.14.0): avisa a loja que um cliente identificado montou um
+   pedido — se ele não finalizar, a loja pode chamá-lo de volta. */
+let ultimaIntencao = 0;
+function registrarIntencao() {
+  const agora = Date.now();
+  if (agora - ultimaIntencao < 20000) return;
+  const whatsEl = $('#ck-whats');
+  if (!whatsEl) return;
+  const whats = soDigitos(whatsEl.value);
+  if (whats.length < 10 || !carrinho.length) return;
+  ultimaIntencao = agora;
+  fetch('/api/public/intencao', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      whatsapp: whats,
+      nome: ($('#ck-nome') || {}).value || '',
+      itens: carrinho.map(i => ({ nome: i.nome, quantidade: i.quantidade })),
+      total_centavos: subtotalCarrinho(),
+    }),
+  }).catch(() => {});
+}
+$('#ck-whats').addEventListener('change', registrarIntencao);
 function atualizarResumoCheckout() {
   const sub = subtotalCarrinho();
   const taxa = taxaAtual();
+  const desconto = descontoCupom(sub);
   $('#rs-subtotal').textContent = R$(sub);
   $('#rs-taxa').textContent = taxa === null ? 'a calcular' : (taxa === 0 ? 'Grátis' : R$(taxa));
-  $('#rs-total').textContent = R$(sub + (taxa || 0));
+  $('#rs-desconto-linha').hidden = desconto <= 0;
+  if (desconto > 0) { $('#rs-cupom-codigo').textContent = cupomAplicado.codigo; $('#rs-desconto').textContent = '-' + R$(desconto); }
+  $('#rs-total').textContent = R$(sub - desconto + (taxa || 0));
   const btn = $('#btn-confirmar');
-  btn.textContent = `Confirmar pedido • ${R$(sub + (taxa || 0))}`;
+  btn.textContent = `Confirmar pedido • ${R$(sub - desconto + (taxa || 0))}`;
   const avisoMin = $('#rs-minimo');
   let bloqueia = false;
   if (loja && loja.pedido_minimo_centavos > 0 && sub < loja.pedido_minimo_centavos) {
@@ -777,6 +929,7 @@ function abrirCheckout() {
     erro.hidden = false;
   } else erro.hidden = true;
   atualizarResumoCheckout();
+  registrarIntencao();
   abrirOverlay('checkout');
 }
 function erroCheckout(msg) {
@@ -824,6 +977,7 @@ $('#form-checkout').addEventListener('submit', async (ev) => {
     tipo: tipoRecebimento,
     bairro_id,
     endereco,
+    cupom_codigo: cupomAplicado ? cupomAplicado.codigo : undefined,
     forma_pagamento: pagamentoSel,
     troco_para_centavos: troco,
     observacao: $('#ck-obs').value.trim(),

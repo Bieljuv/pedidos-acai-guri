@@ -334,6 +334,14 @@
                 <button type="button" class="btn btn-ghost btn-sm upload-btn" id="btnExcluirCapa">Excluir</button>
               </div>
               <input type="hidden" id="lojaCapaUrl">
+              <label>Foco da capa no celular
+                <select id="lojaCapaFoco">
+                  <option value="esquerda">Parte esquerda</option>
+                  <option value="centro">Centro</option>
+                  <option value="direita">Parte direita</option>
+                </select>
+              </label>
+              <span class="dica" style="margin:0">A capa é deitada e o celular é em pé, então ele corta as laterais. Escolha o lado onde está o desenho mais importante da sua capa.</span>
             </div>
           </div>
 
@@ -572,6 +580,42 @@
         </form>
 
         <div class="bloco">
+          <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-tag"></use></svg> Cupons de desconto</h3></div>
+          <p class="dica">Crie um código e divulgue (ex.: no Instagram). O cliente digita no fechamento do pedido e o desconto entra na hora — calculado sobre os produtos, sem mexer na taxa de entrega.</p>
+          <form id="formCupom" class="card-form">
+            <div class="grid-3">
+              <label>Código do cupom
+                <input type="text" id="cupCodigo" maxlength="24" placeholder="BEMVINDO10" style="text-transform:uppercase">
+              </label>
+              <label>Tipo de desconto
+                <select id="cupTipo">
+                  <option value="percentual">% sobre os produtos</option>
+                  <option value="fixo">Valor fixo (R$)</option>
+                </select>
+              </label>
+              <label>Valor
+                <input type="number" id="cupValor" min="0" step="0.01" placeholder="10">
+              </label>
+            </div>
+            <div class="grid-3">
+              <label>Pedido mínimo em R$ (opcional)
+                <input type="number" id="cupMinimo" min="0" step="0.01" placeholder="Sem mínimo">
+              </label>
+              <label>Vale até (opcional)
+                <input type="date" id="cupExpira">
+              </label>
+              <label>Máximo de usos (opcional)
+                <input type="number" id="cupUsosMax" min="1" step="1" placeholder="Ilimitado">
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Criar cupom</button>
+            </div>
+          </form>
+          <div id="cupLista"><p class="dica">Carregando…</p></div>
+        </div>
+
+        <div class="bloco">
           <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Prêmios dos clientes</h3></div>
           <div id="fidPremios"><p class="dica">Carregando…</p></div>
         </div>
@@ -616,6 +660,29 @@
             </div>
           </form>
           <div id="sorHistorico"></div>
+        </div>
+
+        <div class="bloco">
+          <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-refresh"></use></svg> Recuperador de vendas</h3></div>
+          <p class="dica">Cliente montou o pedido, se identificou e <strong>não finalizou</strong>? Depois do tempo que você definir, o sistema chama ele no WhatsApp automaticamente (precisa do WhatsApp configurado em Configurações) — e quem está esperando aparece aqui embaixo, com botão pra chamar na mão.</p>
+          <form id="formRecuperador" class="card-form">
+            <div class="form-row between">
+              <div><strong>Recuperador ativo</strong><div class="dica">Desligado = ninguém é chamado automaticamente (a lista continua registrando).</div></div>
+              <span class="switch"><input type="checkbox" id="recAtivo"><span class="slider"></span></span>
+            </div>
+            <div class="grid-2">
+              <label>Chamar depois de quantos minutos sem finalizar?
+                <input type="number" id="recMinutos" min="5" max="240" step="1">
+              </label>
+              <label>Mensagem (use {nome} e {loja})
+                <input type="text" id="recMensagem" maxlength="500">
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Salvar recuperador</button>
+            </div>
+          </form>
+          <div id="recPendentes"><p class="dica">Carregando…</p></div>
         </div>
       </section>
 
@@ -671,6 +738,25 @@
               <li>Salve e teste a conexão. Depois, faça o <strong>teste real</strong>: informe um número de WhatsApp e envie a mensagem de teste — ela tem que chegar naquele celular.</li>
               <li>Pronto: confirmação, "saiu pra entrega" (com o código de entrega) e "entregue" chegam sozinhos pro cliente. A loja usa o número conectado na instância.</li>
             </ol>
+          </div>
+        </form>
+
+        <form class="card-form" id="formCfgRobo">
+          <div class="form-row between">
+            <div>
+              <strong><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-whatsapp"></use></svg> Robô de atendimento no WhatsApp</strong>
+              <div class="dica">Quem chama no WhatsApp da loja é recebido pelo robô: ele manda o link do cardápio, responde horário e taxa e, se o cliente pedir, chama você. Ele <strong>nunca monta pedido na conversa</strong> — o pedido é sempre no cardápio, sem erro de anotação. Precisa do WhatsApp (Evolution) conectado e do webhook da instância apontado pra <strong>/api/webhooks/whatsapp</strong> deste site.</div>
+            </div>
+            <span class="switch"><input type="checkbox" id="roboAtivo"><span class="slider"></span></span>
+          </div>
+          <label>Mensagem de saudação (use {loja} pro nome da loja)
+            <input type="text" id="roboSaudacao" maxlength="300">
+          </label>
+          <label>Silenciar o robô por quantas horas depois que o cliente pedir um atendente?
+            <input type="number" id="roboSilencio" min="1" max="72" step="1">
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Salvar robô</button>
           </div>
         </form>
 
@@ -915,7 +1001,7 @@
     <div class="sor-nome" id="sorModalNome">…</div>
     <p class="sor-sub" id="sorModalSub"></p>
     <div class="sor-acoes hidden" id="sorModalAcoes">
-      <a class="btn btn-primary" id="sorModalZap" href="#" target="_blank" rel="noopener">Chamar o ganhador no WhatsApp</a>
+      <a class="btn btn-whats" id="sorModalZap" href="#" target="_blank" rel="noopener">Chamar o ganhador no WhatsApp</a>
       <button type="button" class="btn btn-ghost" id="sorModalFechar">Fechar</button>
     </div>
   </div>

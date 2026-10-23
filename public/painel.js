@@ -1359,6 +1359,7 @@ function preencherLoja() {
   $('#lojaSom').value = l.som_pedido || 'padrao';
   $('#lojaLogoUrl').value = l.logo_url || '';
   $('#lojaCapaUrl').value = l.capa_url || '';
+  const focoSel = $('#lojaCapaFoco'); if (focoSel) focoSel.value = l.capa_foco || 'centro';
   const lp = $('#logoPreview'); lp.src = l.logo_url || ''; lp.style.opacity = l.logo_url ? 1 : .3;
   const cp = $('#capaPreview'); cp.src = l.capa_url || ''; cp.style.opacity = l.capa_url ? 1 : .3;
 }
@@ -1403,6 +1404,7 @@ $('#formLoja').addEventListener('submit', async (e) => {
     cor_destaque: $('#temaDestaque').value,
     logo_url: $('#lojaLogoUrl').value || null,
     capa_url: $('#lojaCapaUrl').value || null,
+    capa_foco: ($('#lojaCapaFoco') || {}).value || 'centro',
   };
   try {
     await api('/api/painel/loja', { method: 'PATCH', body: payload });
@@ -1701,16 +1703,19 @@ async function carregarFidelidade() {
   const premios = r.premios || [];
   $('#fidPremios').innerHTML = premios.length ? `
     <table class="simple-table"><thead><tr><th>Cliente</th><th>Prêmio</th><th>Quando ganhou</th><th>Situação</th><th></th></tr></thead>
-    <tbody>${premios.map(p => `<tr>
+    <tbody>${premios.map(p => {
+      const zapMsg = encodeURIComponent(`Oi, ${String(p.cliente_nome || 'Cliente').split(' ')[0]}! Aqui é da ${(state.loja && state.loja.nome) || 'loja'} 🎉 Você ganhou um prêmio: ${p.premio_texto || ''}! ${p.premio_tipo === 'entrega_gratis' ? 'No seu próximo pedido pelo site, a entrega sai grátis sozinha.' : 'É só fazer seu próximo pedido pelo site que a gente aplica o seu prêmio.'} Parabéns e obrigado pela preferência!`);
+      return `<tr>
       <td><strong>${esc(p.cliente_nome || 'Cliente')}</strong><br><span class="dica">${esc(fidFone(p.whatsapp))} · ${p.marco_compras}ª compra</span></td>
       <td>${esc(p.premio_texto || '')}</td>
       <td>${fidDataFmt(p.criado_em)}</td>
       <td>${p.status === 'disponivel' ? '<span class="cfg-pill on">Aguardando resgate</span>'
         : `<span class="cfg-pill sim">Resgatado</span><br><span class="dica">${fidDataFmt(p.resgatado_em)}${p.pedido_resgate_id ? ' · pedido #' + p.pedido_resgate_id : ''}</span>`}</td>
       <td class="acoes-cell">${p.status === 'disponivel' ? `
+        <a class="btn btn-whats btn-sm" target="_blank" rel="noopener" href="https://wa.me/${String(p.whatsapp || '').replace(/\D/g, '')}?text=${zapMsg}"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-whatsapp"></use></svg> Avisar no WhatsApp</a>
         <button type="button" class="btn btn-primary btn-sm" data-fid-resgatar="${p.id}">Dar baixa (resgatou)</button>
         <button type="button" class="btn btn-ghost btn-sm" data-fid-remover="${p.id}">Remover</button>` : ''}</td>
-    </tr>`).join('')}</tbody></table>`
+    </tr>`; }).join('')}</tbody></table>`
     : '<p class="dica">Nenhum prêmio ainda. Quando um cliente completar a meta, o prêmio aparece aqui.</p>';
   const rank = r.ranking || [];
   $('#fidRanking').innerHTML = rank.length ? `
@@ -1724,7 +1729,104 @@ async function carregarFidelidade() {
     : '<p class="dica">Nenhuma compra entregue ainda.</p>';
   renderSorHistorico(r.sorteios || []);
   sorAtualizarPreview();
+  carregarCupons();
+  carregarRecuperador();
 }
+// ---------------- Cupons de desconto (v1.14.0) ----------------
+async function carregarCupons() {
+  const el = $('#cupLista');
+  if (!el) return;
+  const r = await api('/api/painel/cupons');
+  const lista = r.cupons || [];
+  el.innerHTML = lista.length ? `
+    <table class="simple-table"><thead><tr><th>Código</th><th>Desconto</th><th>Mínimo</th><th>Validade</th><th>Usos</th><th>Ativo</th><th></th></tr></thead>
+    <tbody>${lista.map(c => `<tr>
+      <td><strong>${esc(c.codigo)}</strong></td>
+      <td>${c.tipo === 'percentual' ? c.valor + '%' : fmtBRL(c.valor)}</td>
+      <td>${Number(c.minimo_centavos) > 0 ? fmtBRL(c.minimo_centavos) : '—'}</td>
+      <td>${c.expira_em ? esc(c.expira_em.split('-').reverse().join('/')) : 'Sem data'}</td>
+      <td>${c.usos}${c.usos_max != null ? ' de ' + c.usos_max : ''}</td>
+      <td><span class="switch"><input type="checkbox" data-cupom-ativo="${c.id}" ${c.ativo ? 'checked' : ''}><span class="slider"></span></span></td>
+      <td class="acoes-cell"><button type="button" class="btn btn-ghost btn-sm" data-cupom-del="${c.id}">Excluir</button></td>
+    </tr>`).join('')}</tbody></table>`
+    : '<p class="dica">Nenhum cupom ainda. Crie o primeiro acima (ex.: PRIMEIRACOMPRA com 10%).</p>';
+}
+$('#formCupom').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tipo = $('#cupTipo').value;
+  const valorBruto = parseFloat($('#cupValor').value.replace(',', '.'));
+  if (isNaN(valorBruto) || valorBruto <= 0) { toast('Informe o valor do desconto.', true); return; }
+  const minimo = parseFloat(($('#cupMinimo').value || '').replace(',', '.'));
+  try {
+    await api('/api/painel/cupons', {
+      method: 'POST',
+      body: {
+        codigo: $('#cupCodigo').value.trim(),
+        tipo,
+        valor: tipo === 'percentual' ? Math.round(valorBruto) : Math.round(valorBruto * 100),
+        minimo_centavos: isNaN(minimo) ? 0 : Math.round(minimo * 100),
+        expira_em: $('#cupExpira').value || null,
+        usos_max: $('#cupUsosMax').value ? Number($('#cupUsosMax').value) : null,
+      },
+    });
+    toast('Cupom criado.');
+    e.target.reset();
+    carregarCupons();
+  } catch (err) { toast(err.message, true); }
+});
+document.addEventListener('change', async (e) => {
+  const sw = e.target.closest('[data-cupom-ativo]');
+  if (!sw) return;
+  try {
+    await api(`/api/painel/cupons/${sw.dataset.cupomAtivo}/ativo`, { method: 'PUT', body: { ativo: sw.checked } });
+    toast(sw.checked ? 'Cupom ativado.' : 'Cupom desativado.');
+  } catch (err) { toast(err.message, true); sw.checked = !sw.checked; }
+});
+document.addEventListener('click', async (e) => {
+  const del = e.target.closest('[data-cupom-del]');
+  if (!del) return;
+  if (!confirm('Excluir este cupom? Quem já usou não é afetado.')) return;
+  await api(`/api/painel/cupons/${del.dataset.cupomDel}`, { method: 'DELETE' });
+  toast('Cupom excluído.');
+  carregarCupons();
+});
+
+// ---------------- Recuperador de vendas (v1.14.0) ----------------
+async function carregarRecuperador() {
+  const el = $('#recPendentes');
+  if (!el) return;
+  const r = await api('/api/painel/recuperador');
+  const c = r.config || {};
+  $('#recAtivo').checked = !!c.ativo;
+  $('#recMinutos').value = c.minutos || 30;
+  $('#recMensagem').value = c.mensagem || '';
+  const lista = r.pendentes || [];
+  el.innerHTML = lista.length ? `
+    <h4 style="margin:.9rem 0 .4rem">Esperando — montaram e não finalizaram</h4>
+    <table class="simple-table"><thead><tr><th>Cliente</th><th>O que montou</th><th>Total</th><th>Última mexida</th><th>Situação</th><th></th></tr></thead>
+    <tbody>${lista.map(p => {
+      const itensTxt = (p.itens || []).map(i => `${i.quantidade}× ${i.nome}`).join(', ');
+      const msg = encodeURIComponent(`Oi, ${String(p.nome || 'cliente').split(' ')[0]}! Aqui é da ${(state.loja && state.loja.nome) || 'loja'} 😊 Você montou um pedido (${itensTxt}) e não finalizou — ele ficou guardadinho no seu aparelho, é só voltar na loja e concluir. Qualquer dúvida é só chamar!`);
+      return `<tr>
+      <td><strong>${esc(p.nome || 'Cliente')}</strong><br><span class="dica">${esc(fidFone(p.whatsapp))}</span></td>
+      <td>${esc(itensTxt)}</td>
+      <td>${fmtBRL(p.total_centavos)}</td>
+      <td>${fidDataFmt(p.atualizado_em)}</td>
+      <td>${p.avisado_em ? '<span class="cfg-pill on">Chamado no WhatsApp</span>' : '<span class="cfg-pill sim">Aguardando o prazo</span>'}</td>
+      <td class="acoes-cell"><a class="btn btn-whats btn-sm" target="_blank" rel="noopener" href="https://wa.me/${String(p.whatsapp || '').replace(/\D/g, '')}?text=${msg}"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-whatsapp"></use></svg> Chamar</a></td>
+    </tr>`; }).join('')}</tbody></table>`
+    : '<p class="dica">Ninguém esperando agora. Quando um cliente montar um pedido e não finalizar, ele aparece aqui.</p>';
+}
+$('#formRecuperador').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await api('/api/painel/recuperador/config', {
+    method: 'PUT',
+    body: { ativo: $('#recAtivo').checked, minutos: Number($('#recMinutos').value), mensagem: $('#recMensagem').value.trim() },
+  });
+  toast('Recuperador salvo.');
+  carregarRecuperador();
+});
+
 $('#formFidelidade').addEventListener('submit', async (e) => {
   e.preventDefault();
   await api('/api/painel/fidelidade/config', {
@@ -1911,7 +2013,7 @@ function renderSorHistorico(lista) {
       <td>${esc(s.premio_texto)}</td>
       <td>${s.total_clientes} cliente(s) · ${s.total_chances} chance(s)</td>
       <td><strong>${esc(s.ganhador_nome || 'Cliente')}</strong><br><span class="dica">${esc(fidFone(s.ganhador_whatsapp))} · tinha ${s.ganhador_chances} chance(s)</span></td>
-      <td class="acoes-cell"><a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://wa.me/${String(s.ganhador_whatsapp || '').replace(/\D/g, '')}?text=${msg}">WhatsApp</a></td>
+      <td class="acoes-cell"><a class="btn btn-whats btn-sm" target="_blank" rel="noopener" href="https://wa.me/${String(s.ganhador_whatsapp || '').replace(/\D/g, '')}?text=${msg}">WhatsApp</a></td>
     </tr>`;
     }).join('')}</tbody></table>`;
 }
@@ -2244,6 +2346,7 @@ async function carregarConfiguracoes() {
   } catch (err) { toast(err.message, true); }
   carregarCfg99(); // silencioso se falhar (a tela principal não depende dele)
   carregarCfgIfood();
+  carregarCfgRobo();
 }
 /* Mostrar / ocultar os campos de segredo (chave de API e token) */
 $$('[data-mostrar]').forEach(b => b.addEventListener('click', () => {
@@ -2253,6 +2356,26 @@ $$('[data-mostrar]').forEach(b => b.addEventListener('click', () => {
   input.type = mostrar ? 'text' : 'password';
   b.innerHTML = mostrar ? ic('olhoOff') + ' Ocultar' : ic('olho') + ' Mostrar';
 }));
+
+/* ----- Robô de atendimento no WhatsApp (v1.15.0) ----- */
+async function carregarCfgRobo() {
+  try {
+    const c = await api('/api/painel/whats-robo/config');
+    $('#roboAtivo').checked = !!c.ativo;
+    $('#roboSaudacao').value = c.saudacao || '';
+    $('#roboSilencio').value = c.silencio_horas || 24;
+  } catch { /* silencioso: a tela não depende dele */ }
+}
+$('#formCfgRobo').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await api('/api/painel/whats-robo/config', {
+      method: 'PUT',
+      body: { ativo: $('#roboAtivo').checked, saudacao: $('#roboSaudacao').value.trim(), silencio_horas: Number($('#roboSilencio').value) },
+    });
+    toast('Robô salvo.');
+  } catch (err) { toast(err.message, true); }
+});
 
 /* ----- WhatsApp (Evolution API) ----- */
 async function salvarCfgWhats() {

@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
   troco_para_centavos INTEGER, observacao TEXT,
   motivo_cancelamento TEXT, atualizado_por TEXT,
   codigo_entrega TEXT,
+  cupom_codigo TEXT,
   entrega_provedor TEXT, entrega_ext_id TEXT, entrega_status TEXT, entrega_chamada_em TEXT,
   created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
   UNIQUE(loja_id, numero)
@@ -226,12 +227,16 @@ if (MODO === 'sqlite') {
     'ALTER TABLE lojas ADD COLUMN documento TEXT',
     // v1.9.29: cores do tema da loja.
     'ALTER TABLE lojas ADD COLUMN cor_primaria TEXT',
+    'ALTER TABLE lojas ADD COLUMN capa_foco TEXT',
     'ALTER TABLE lojas ADD COLUMN cor_destaque TEXT',
     // v1.9.30: marcações do assistente de primeira configuração.
     'ALTER TABLE lojas ADD COLUMN setup_json TEXT',
     // iFood (v1.12.0): pedidos ganham origem/externo_id
     'ALTER TABLE pedidos ADD COLUMN origem TEXT DEFAULT \'proprio\'',
     'ALTER TABLE pedidos ADD COLUMN externo_id TEXT',
+    // v1.14.0: cupom de desconto aplicado no pedido.
+    'ALTER TABLE pedidos ADD COLUMN cupom_codigo TEXT',
+    'ALTER TABLE pedidos ADD COLUMN desconto_centavos INTEGER DEFAULT 0',
   ]) { try { sq.exec(alt); } catch { /* coluna já existe */ } }
 }
 
@@ -510,10 +515,13 @@ async function init() {
   // v1.9.15: garante a coluna do documento da loja em bancos PG já existentes.
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS documento TEXT');
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cor_primaria TEXT');
+  await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS capa_foco TEXT');
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cor_destaque TEXT');
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS setup_json TEXT');
   await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origem TEXT DEFAULT 'proprio'");
   await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS externo_id TEXT');
+  await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cupom_codigo TEXT');
+  await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS desconto_centavos INTEGER DEFAULT 0');
   console.log('[banco] Modo SUPABASE: conectado no Postgres da DATABASE_URL.');
   if (await seed()) console.log('[banco] Postgres vazio — seed inicial aplicado (loja de exemplo + admin/admin123).');
 }

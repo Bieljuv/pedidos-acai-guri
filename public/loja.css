@@ -94,6 +94,14 @@ body.rolou .hnome{opacity:1;transform:none}
    ficavam cortados fora, parecendo que a capa nem existia). O dono escolhe
    em Loja e Aparência qual parte aparece: esquerda, centro ou direita. */
 @media (max-width:700px){
+  /* v1.16.6 (o Gabriel: "capa tem que ficar ESTENDIDA igual no
+     computador"): a capa segue de FUNDO CHEIO do heroi no celular
+     tambem, com a logo e os textos por cima. O recorte em pe cai,
+     por padrao, no lado ESQUERDO da arte (onde costuma ficar o
+     desenho principal — no Guri, a tigela), porque o "centro" da
+     arte deitada e normalmente fundo vazio e parecia que nao tinha
+     capa. Se o dono escolher o foco direito no painel, vale o dele. */
+  .hero-capa{ object-position:14% 50%; }
   .hero-capa.foco-esquerda{ object-position:14% 50%; }
   .hero-capa.foco-direita{ object-position:86% 50%; }
 }
@@ -507,6 +515,21 @@ body.rolou .hnome{opacity:1;transform:none}
 :root[data-tema="escuro"] .campo input,
 :root[data-tema="escuro"] .campo select,
 :root[data-tema="escuro"] .sheet{background:#24062A}
+/* Superficies que FALTAVAM no escuro (v1.16.5 — o Gabriel mostrou com
+   prints: acompanhamento e Peca de novo brancos com texto invisivel):
+   tinham fundo claro FIXO e texto herdado; no escuro o texto clareia
+   junto (var --ink) e sumia no fundo branco. Entram no mesmo roxo-noite
+   dos cartoes. Vale pra TODAS as telas: inicial, carrinho, montador,
+   finalizacao e acompanhamento. */
+:root[data-tema="escuro"] .acomp-card,
+:root[data-tema="escuro"] .peca-de-novo,
+:root[data-tema="escuro"] .item-carrinho,
+:root[data-tema="escuro"] .pag-opcao,
+:root[data-tema="escuro"] .resumo,
+:root[data-tema="escuro"] .qtd-controle,
+:root[data-tema="escuro"] .pag-online-aviso,
+:root[data-tema="escuro"] .pagamento-box{background:#24062A}
+:root[data-tema="escuro"] .moto-legenda{color:var(--destaque-claro, #F2C1F7)}
 :root[data-tema="escuro"] .chip{background:#24062A}
 :root[data-tema="escuro"] .opcao.selecionada{background:#3A0A40}
 :root[data-tema="escuro"] .op-marcador{background:#24062A}

@@ -7,6 +7,19 @@
 // date(created_at,'localtime')=?  (nunca date(created_at) puro — bug do fuso).
 const { get, all, run, execSql, modoBanco } = require('./db');
 
+// Fontes do PDF (v1.16.6): o pdfkit carrega as fontes padrao por um
+// atalho interno ("#standard-fonts") que o empacotador da Vercel NAO
+// enxerga — as fontes nao subiam no deploy e TODA rota de PDF dava
+// erro 500 em producao (provado por simulacao do pacote). Estes dois
+// requires literais, pelos subcaminhos PUBLICOS do pacote, fazem as
+// fontes usadas (Helvetica e Helvetica-Bold) entrarem no pacote.
+// (A tentativa anterior via includeFiles no vercel.json fez a
+// publicacao FALHAR na Vercel — esta correcao e so codigo.)
+try {
+  require('pdfkit/standard-fonts/Helvetica');
+  require('pdfkit/standard-fonts/HelveticaBold');
+} catch { /* layout do pacote mudou: o PDF segue o comportamento atual */ }
+
 if (modoBanco() === 'sqlite') execSql(`
 CREATE TABLE IF NOT EXISTS fin_lancamentos (
   id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL DEFAULT 1,

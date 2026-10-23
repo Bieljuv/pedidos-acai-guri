@@ -233,13 +233,25 @@ h3.view-h{margin-bottom:.4rem}
 @media (max-width:860px){
   .app{flex-direction:column}
   .sidebar{width:100%;height:auto;position:static}
-  .menu{flex-direction:row;flex-wrap:wrap}
-  .menu-item{width:auto}
-  .submenu{flex-direction:row;flex-wrap:wrap}
+  /* v1.9.12 (celular): cabecalho compacto — antes o menu ocupava a tela toda */
+  .brand{flex-direction:row;align-items:center;padding:.55rem .8rem;gap:.7rem}
+  .brand img{width:104px;border-radius:10px}
+  .menu{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;padding:.5rem .6rem;gap:.4rem;scrollbar-width:none}
+  .menu::-webkit-scrollbar{display:none}
+  .menu-item{width:auto;white-space:nowrap;flex:none;padding:.55rem .7rem}
+  .submenu{flex-direction:row;flex-wrap:nowrap;overflow-x:auto}
   .submenu.open{display:flex}
-  .side-footer{flex-direction:row;flex-wrap:wrap;align-items:center}
+  .side-footer{flex-direction:row;flex-wrap:wrap;align-items:center;padding:.5rem .8rem;margin-top:0}
   .grid-2{grid-template-columns:1fr}
   .grupos-checks{grid-template-columns:1fr}
+  .content{padding:.7rem}
+  .topbar{padding:.55rem .7rem}
+  /* quadro de pedidos: colunas deslizaveis, uma por vez com espiada da proxima */
+  .board{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:.6rem}
+  .coluna{flex:0 0 84vw;scroll-snap-align:start;min-height:120px}
+  /* tabelas largas rolam de lado em vez de espremer */
+  .simple-table,.opcoes-table{display:block;overflow-x:auto;white-space:nowrap}
+  .prod-row{flex-wrap:wrap}
 }
 
 /* ================= FINANCEIRO ================= */

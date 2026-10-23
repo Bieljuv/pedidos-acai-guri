@@ -337,6 +337,44 @@ function pararSom() {
 }
 document.addEventListener('pointerdown', () => { if (state.somAtivo) pararSom(); });
 
+/* v1.9.12: som no celular — o navegador movel so libera audio depois de um
+   gesto do usuario. No PRIMEIRO toque/clique/tecla: criamos e retomamos o
+   AudioContext e preparamos (play+pause silencioso) cada elemento de audio;
+   dai em diante os alertas tocam sozinhos. Ao voltar pra aba, retoma o
+   contexto caso o navegador o tenha suspendido. */
+let audioDestravado = false;
+function primarAudio(el) {
+  if (!el) return;
+  try {
+    el.volume = 0;
+    const p = el.play();
+    const fim = () => { try { el.pause(); el.currentTime = 0; el.volume = 1; } catch { /* ok */ } };
+    if (p && p.then) p.then(fim).catch(() => { el.volume = 1; });
+    else fim();
+  } catch { /* sem audio */ }
+}
+function destravarAudio() {
+  if (audioDestravado) return;
+  audioDestravado = true;
+  try {
+    if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (state.audioCtx.state === 'suspended') state.audioCtx.resume();
+  } catch { /* sem audio */ }
+  const sel = somSelecionado();
+  if (sel && sel !== 'padrao') {
+    if (!audioArquivo) { audioArquivo = new Audio(); audioArquivo.dataset.src = '/sons/' + sel; audioArquivo.src = '/sons/' + sel; }
+    primarAudio(audioArquivo);
+  }
+  if (!audioDinheiro) audioDinheiro = new Audio('/sons/money-soundfx.mp3');
+  primarAudio(audioDinheiro);
+  primarAudio($('#alertaAudio'));
+}
+document.addEventListener('pointerdown', destravarAudio);
+document.addEventListener('keydown', destravarAudio);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.audioCtx && state.audioCtx.state === 'suspended') state.audioCtx.resume();
+});
+
 /* ================= PEDIDOS ================= */
 const FORMA_ROTULO = { pix:'Pix', dinheiro:'Dinheiro', cartao:'Cartão', pix_mp:'Pix MP', cartao_mp:'Cartão MP', pix_asaas:'Pix Asaas', cartao_asaas:'Cartão Asaas' };
 const STATUS_ROTULO = { NOVO:'Novo', EM_PREPARO:'Em preparo', PRONTO:'Pronto', SAIU_ENTREGA:'Saiu p/ entrega', ENTREGUE:'Entregue', CANCELADO:'Cancelado' };

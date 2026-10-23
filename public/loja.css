@@ -489,3 +489,25 @@ img{max-width:100%}
 @media (prefers-reduced-motion: reduce){.moto-img,.moto-vento,.moto-chao{animation:none}}
 .opcao .op-preco.extra{color:#c77400}
 :root[data-tema="escuro"] .opcao .op-preco.extra{color:#f5b453}
+
+/* Celular (v1.9.12): hero compacto pra o cardapio aparecer sem rolar tanto. */
+@media (max-width:700px){
+  .hero{padding-bottom:22px}
+  .hero-logo{width:min(190px,52vw)}
+  .hero h1{font-size:24px;margin-top:12px}
+  .hero-links{margin-top:12px}
+}
+
+/* Legibilidade no escuro (v1.9.12): precos/totais/contadores em roxo sobre o
+   cartao escuro somem — no escuro viram lilas claro; apoio e chips clareiam. */
+:root[data-tema="escuro"]{--ink-suave:#DEC9E8}
+:root[data-tema="escuro"] .cp-preco,
+:root[data-tema="escuro"] .grupo-contador,
+:root[data-tema="escuro"] .opcao .op-preco,
+:root[data-tema="escuro"] .ic-preco,
+:root[data-tema="escuro"] .linha-total strong,
+:root[data-tema="escuro"] .resumo-total strong,
+:root[data-tema="escuro"] .btn-texto,
+:root[data-tema="escuro"] .btn-voltar{color:#F2C1F7}
+:root[data-tema="escuro"] .chip{color:#EFD9F5;border-color:#7A4A86}
+:root[data-tema="escuro"] .opcao .op-preco.gratis{color:#5ED97E}

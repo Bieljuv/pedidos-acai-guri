@@ -168,7 +168,15 @@ async function gerarVinculo() {
   });
   let j = null;
   try { j = await resp.json(); } catch { /* erro sem corpo */ }
-  if (!resp.ok || !j || !j.userCode) throw new Error('O iFood não gerou o código de vínculo (' + resp.status + '). Confira o Client ID do app.');
+  if (!resp.ok) {
+    // 400 aqui quase sempre = app CENTRALIZADO (o app de teste é um):
+    // o userCode só existe no modelo distribuído. Sem essa explicação
+    // a pessoa sai procurando erro de digitação que não existe
+    // (aconteceu com o Gabriel em 23/10).
+    if (resp.status === 400) throw new Error('O iFood recusou o código de vínculo (400). Isso acontece quando o app é CENTRALIZADO (o app de teste é assim): app centralizado NÃO usa vínculo. É só ligar a integração lá em cima e clicar em "Verificar pedidos agora". O vínculo é só para app DISTRIBUÍDO.');
+    throw new Error('O iFood não gerou o código de vínculo (' + resp.status + '). Confira o Client ID do app.');
+  }
+  if (!j || !j.userCode) throw new Error('O iFood respondeu sem o código de vínculo. Tente de novo.');
   const expira = new Date(Date.now() + Number(j.expiresIn || 600) * 1000);
   await run('UPDATE config_ifood SET user_code=?, code_verifier=?, user_code_expira=? WHERE id=?',
     j.userCode, j.authorizationCodeVerifier || null, expira.toISOString(), lid());

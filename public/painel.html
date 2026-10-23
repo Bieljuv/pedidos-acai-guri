@@ -11,6 +11,13 @@
 <script src="/icons.js"></script>
 <link rel="stylesheet" href="/painel.css">
 <link rel="icon" href="/uploads/seed-logo.png">
+<link rel="manifest" href="/painel.webmanifest">
+<meta name="theme-color" content="#3C0151">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Painel">
+<link rel="apple-touch-icon" href="/img/pwa/apple-touch-icon.png">
 </head>
 <body>
 
@@ -73,6 +80,8 @@
 
     <div class="side-footer">
       <div class="side-user"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-user"></use></svg> <span id="userNome">—</span> <span id="userPerfil" class="user-perfil"></span></div>
+      <button class="btn btn-ghost btn-sm hidden" id="btnPush"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-bell"></use></svg> <span id="btnPushTxt">Ativar notificações</span></button>
+      <button class="btn btn-ghost btn-sm hidden" id="btnInstalarApp"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-grid"></use></svg> Instalar app do painel</button>
       <button class="btn btn-ghost btn-sm" id="btnTrocarSenha">Trocar senha</button>
       <button class="btn btn-ghost btn-sm" id="btnSair"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-logout"></use></svg> Sair</button>
     </div>

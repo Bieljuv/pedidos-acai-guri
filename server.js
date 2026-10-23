@@ -16,6 +16,7 @@ const financeiro = require('./src/financeiro');
 const equipe = require('./src/equipe');
 const entregadores = require('./src/entregadores');
 const fidelidade = require('./src/fidelidade');
+const pushPainel = require('./src/push');
 const notif = require('./src/notificacoes');
 const pagamentos = require('./src/pagamentos');
 const comanda = require('./src/comanda');
@@ -31,7 +32,7 @@ app.use(express.json({ limit: '1mb' }));
 // notificações). TODA rota /api aguarda essa promise — no SQLite é imediata;
 // no Postgres (Supabase) é o que garante schema conferido e seed aplicado
 // antes da primeira resposta. Se rejeitar, a API responde 500 com a causa.
-const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await fidelidade.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
+const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await fidelidade.preparar(); await pushPainel.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
 pronto.catch((e) => console.error('[banco]', e.message));
 app.use('/api', async (req, res, next) => {
   try { await pronto; next(); }
@@ -631,6 +632,26 @@ app.delete('/api/painel/fidelidade/premios/:id', auth, soAdmin, h(async (req, re
   res.json(await fidelidade.removerPremio(Number(req.params.id)));
 }));
 
+// ---------------- Painel: Notificações push (v1.9.20, qualquer logado) ------
+app.get('/api/painel/push/chave', auth, (req, res) => {
+  const chave = pushPainel.chavePublica();
+  if (!chave) return res.status(503).json({ erro: 'Push indisponível neste servidor.' });
+  res.json({ chave });
+});
+app.post('/api/painel/push/inscrever', auth, h(async (req, res) => {
+  const r = await pushPainel.inscrever(req.usuario.id, (req.body || {}).subscription, req.headers['user-agent']);
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
+  res.json(r);
+}));
+app.post('/api/painel/push/desinscrever', auth, h(async (req, res) => {
+  res.json(await pushPainel.desinscrever(req.usuario.id, (req.body || {}).endpoint));
+}));
+app.post('/api/painel/push/testar', auth, h(async (req, res) => {
+  const r = await pushPainel.testar(req.usuario.id);
+  if (!r.ok) return res.status(422).json({ erro: r.erro || 'Falha no teste.' });
+  res.json(r);
+}));
+
 // ---------------- Painel: Equipe + Ponto (v1.8) ----------------
 // Gestão (CRUD de funcionários, jornada, relatório e ajustes) = só admin.
 // O ponto do PRÓPRIO usuário (hoje/entrada/saída) é de qualquer logado.
@@ -696,6 +717,30 @@ app.get('/api/painel/stream', h(async (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.write('event: ola\ndata: {}\n\n');
   eventos.registrarCliente(res);
+}));
+
+// PWA do painel (v1.9.19): manifesto gerado com o nome da loja — o painel
+// vira "app" instalável no celular do dono (sem loja de aplicativos).
+app.get('/painel.webmanifest', h(async (req, res) => {
+  const loja = await get('SELECT * FROM lojas WHERE id=1');
+  const nome = (loja && loja.nome) || 'Minha Loja';
+  res.type('application/manifest+json').json({
+    name: `Painel — ${nome}`,
+    short_name: nome.slice(0, 30),
+    description: 'Painel de pedidos da loja',
+    id: '/painel',
+    start_url: '/painel',
+    scope: '/painel',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: '#3C0151',
+    theme_color: '#3C0151',
+    icons: [
+      { src: '/img/pwa/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/img/pwa/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/img/pwa/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+  });
 }));
 
 // ---------------- Estáticos ----------------

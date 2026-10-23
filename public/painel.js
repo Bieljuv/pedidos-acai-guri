@@ -1531,6 +1531,93 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+// ---------------- App do painel / PWA (v1.9.19) ----------------
+// Instala o painel na tela inicial do celular (Android: prompt do navegador;
+// iPhone: instrução manual, pois a Apple não oferece prompt). O service
+// worker é rede-primeiro: com internet, o painel é SEMPRE o ao vivo.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/painel-sw.js', { scope: '/painel' }).catch(() => { /* sem SW, sem app — painel segue normal */ });
+}
+let promptInstalarApp = null;
+const jaInstaladoApp = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  promptInstalarApp = e;
+  if (!jaInstaladoApp) $('#btnInstalarApp').classList.remove('hidden');
+});
+window.addEventListener('appinstalled', () => {
+  promptInstalarApp = null;
+  $('#btnInstalarApp').classList.add('hidden');
+  toast('App do painel instalado! Ele está na sua tela inicial.');
+});
+const ehIOSPainel = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+if (ehIOSPainel && !jaInstaladoApp) $('#btnInstalarApp').classList.remove('hidden');
+$('#btnInstalarApp').addEventListener('click', async () => {
+  if (promptInstalarApp) {
+    await promptInstalarApp.prompt();
+    promptInstalarApp = null;
+    $('#btnInstalarApp').classList.add('hidden');
+  } else if (ehIOSPainel) {
+    alert('Para instalar o app do painel:\n\n1. Toque no botão Compartilhar (o quadrado com a seta pra cima, na barra do Safari)\n2. Toque em "Adicionar à Tela de Início"\n3. Toque em "Adicionar"\n\nO painel vira um ícone na sua tela, igual a um app.');
+  }
+});
+
+// Push do painel (v1.9.20): aviso de pedido novo na tela bloqueada.
+// Ativação é POR APARELHO (cada celular/tablet ativa o seu). No iPhone, o
+// PushManager só existe com o painel instalado (iOS 16.4+) — por isso o
+// botão nem aparece onde não há suporte.
+const pushSuportado = 'PushManager' in window && 'serviceWorker' in navigator && 'Notification' in window;
+function vapidParaBytes(base64) {
+  const pad = '='.repeat((4 - (base64.length % 4)) % 4);
+  const b64 = (base64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+async function estadoBotaoPush() {
+  const btn = $('#btnPush');
+  if (!btn) return;
+  if (!pushSuportado || !state.token) { btn.classList.add('hidden'); return; }
+  btn.classList.remove('hidden');
+  if (Notification.permission === 'denied') { $('#btnPushTxt').textContent = 'Notificações bloqueadas'; btn.dataset.ativo = ''; return; }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    btn.dataset.ativo = sub ? '1' : '';
+    $('#btnPushTxt').textContent = sub ? 'Notificações ativas — testar' : 'Ativar notificações';
+    // Renovação silenciosa: se já existe inscrição, regrava no servidor
+    // (o endpoint pode ter mudado e o login pode ser de outro usuário).
+    if (sub && Notification.permission === 'granted') {
+      api('/api/painel/push/inscrever', { method: 'POST', body: { subscription: sub.toJSON() } }).catch(() => {});
+    }
+  } catch { /* sem SW pronto ainda; o clique tenta de novo */ }
+}
+$('#btnPush').addEventListener('click', async () => {
+  if (!pushSuportado) return;
+  if (Notification.permission === 'denied') {
+    toast('As notificações estão bloqueadas neste navegador. Toque no cadeado/ícone na barra de endereço, libere as notificações e tente de novo.', true);
+    return;
+  }
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && $('#btnPush').dataset.ativo === '1') {
+    const r = await api('/api/painel/push/testar', { method: 'POST', body: {} }).catch((e) => ({ erro: e.message }));
+    if (r && r.ok) toast('Notificação de teste enviada — olhe a tela do aparelho!');
+    else toast((r && r.erro) || 'Falha ao enviar o teste.', true);
+    return;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('Sem a sua permissão, o aviso não chega com a tela bloqueada.', true); return; }
+    if (!sub) {
+      const respChave = await api('/api/painel/push/chave');
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidParaBytes(respChave.chave) });
+    }
+    await api('/api/painel/push/inscrever', { method: 'POST', body: { subscription: sub.toJSON() } });
+    toast('Notificações ativadas neste aparelho! Pedido novo agora apita até com a tela bloqueada.');
+    estadoBotaoPush();
+  } catch (e) { toast('Não consegui ativar: ' + (e.message || e), true); }
+});
+
 // ---------------- Sorteio de promoções (v1.9.18) ----------------
 function sorFmtData(d) {
   const p = (n) => String(n).padStart(2, '0');
@@ -2389,6 +2476,7 @@ function modalAjustePonto(preset) {
 function iniciarApp() {
   $('#loginView').classList.add('hidden');
   $('#appView').classList.remove('hidden');
+  estadoBotaoPush();
   const ehAdmin = !state.user || state.user.perfil === 'admin';
   if (state.user) {
     $('#userNome').textContent = state.user.nome || 'Admin';

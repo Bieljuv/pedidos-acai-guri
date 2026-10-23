@@ -5,6 +5,7 @@ const { tokenAleatorio, normalizaFone, lojaEstaAberta } = require('./util');
 const notif = require('./notificacoes');
 const eventos = require('./eventos');
 const fidelidade = require('./fidelidade');
+const pushPainel = require('./push');
 
 const TRANSICOES = {
   NOVO: ['EM_PREPARO', 'CANCELADO'],
@@ -203,6 +204,8 @@ async function criarPedido(corpo) {
     try { await fidelidade.consumirPremio(premioFidelidadeId, pedidoId); } catch { /* idem */ }
   }
   await notif.notificarNovoPedido(pedido, itens);
+  // Push do painel (v1.9.20): flutuante de propósito — nunca atrasa a venda.
+  pushPainel.novoPedido(pedido);
   eventos.emitir('pedido', { acao: 'novo', pedido_id: pedidoId, numero });
   return { pedido, itens };
   function itemObs(corpoOriginal, it) {

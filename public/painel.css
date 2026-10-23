@@ -369,7 +369,7 @@ tr.ponto-aberto td{background:#fdf3d8}
 
 /* ---------- Tema escuro do painel (data-tema="escuro" no <html>) ---------- */
 :root[data-tema="escuro"]{
-  --bg:#170021; --ink:#f3e9f7; --card:#2b1038; --muted:#bfa9cc; --linha:#4a2a5e;
+  --bg:#170021; --ink:#f3e9f7; --card:#2b1038; --muted:#d8c4e6; --linha:#4a2a5e;
   color-scheme:dark;
 }
 :root[data-tema="escuro"] .topbar{background:#22002e;border-color:var(--linha)}
@@ -442,3 +442,12 @@ tr.ponto-aberto td{background:#fdf3d8}
 .cfg-grupo{margin-top:1rem;padding:.4rem .9rem .9rem;border:1px solid var(--borda,#e3d7ea);border-radius:10px}
 .cfg-grupo legend{padding:0 .45rem;font-weight:600}
 .check-linha{display:flex;align-items:center;gap:.5rem;margin:.4rem 0}
+/* Legibilidade no escuro (v1.9.10): numeros/valores em roxo-escuro sobre o
+   cartao escuro nao se le — no tema escuro viram lilas claro de alto contraste. */
+:root[data-tema="escuro"] .prod-preco,
+:root[data-tema="escuro"] .pcard-total,
+:root[data-tema="escuro"] .det-totais .total,
+:root[data-tema="escuro"] .fin-res-item strong,
+:root[data-tema="escuro"] .ponto-func-head .total{color:#f2c1f7}
+:root[data-tema="escuro"] .codigo-box .codigo-rot{color:#eec9f5}
+:root[data-tema="escuro"] .guia li::marker{color:#f2c1f7}

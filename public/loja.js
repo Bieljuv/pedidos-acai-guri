@@ -380,6 +380,10 @@ function renderGruposMontador() {
     const ops = (g.opcoes || []).slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
     const noLimite = g.tipo_escolha === 'multipla' && !g.excedente_vira_pago &&
       g.maximo != null && contSel >= g.maximo;
+    const cotaGrupo = (g.tipo_escolha === 'multipla' && g.excedente_vira_pago && g.maximo != null)
+      ? g.maximo : null;
+    const idsGrupo = new Set(ops.map((x) => x.id));
+    const marcadosGrupo = [...mont.selecionadas].filter((id) => idsGrupo.has(id));
     for (const o of ops) {
       const sel = mont.selecionadas.has(o.id);
       const b = document.createElement('button');
@@ -388,9 +392,23 @@ function renderGruposMontador() {
         (sel ? ' selecionada' : '') + (o.esgotada ? ' esgotada' : '') +
         (!sel && noLimite ? ' bloqueada' : '');
       b.disabled = !!o.esgotada;
-      const preco = (o.preco_adicional_centavos || 0) > 0
-        ? `<span class="op-preco">+ ${R$(o.preco_adicional_centavos)}</span>`
-        : `<span class="op-preco gratis">incluso</span>`;
+      /* v1.9.11: rotulo segue a COTA do grupo — os primeiros `maximo` marcados
+         sao "incluso"; da cota em diante, "+ R$ X extra" (espelha o calculo de
+         calcularUnitario). A ordem e a de marcacao (o Set guarda a insercao);
+         opcao ainda nao marcada ja mostra "extra" se a cota estiver cheia. */
+      let preco;
+      if ((o.preco_adicional_centavos || 0) > 0) {
+        preco = `<span class="op-preco">+ ${R$(o.preco_adicional_centavos)}</span>`;
+      } else if (cotaGrupo != null) {
+        const ehExtra = sel
+          ? marcadosGrupo.indexOf(o.id) >= cotaGrupo
+          : marcadosGrupo.length >= cotaGrupo;
+        preco = ehExtra
+          ? `<span class="op-preco extra">+ ${R$(g.preco_excedente_centavos || 0)} extra</span>`
+          : `<span class="op-preco gratis">incluso</span>`;
+      } else {
+        preco = `<span class="op-preco gratis">incluso</span>`;
+      }
       b.innerHTML = `<span class="op-marcador">${sel ? icLoja('check') : ''}</span>
         <span class="op-nome">${esc(o.nome)}${o.esgotada ? ' (esgotado)' : ''}</span>${preco}`;
       b.addEventListener('click', () => alternarOpcao(g, o));
@@ -868,21 +886,15 @@ function renderAcompanhamento(d) {
       <strong class="codigo-num">${esc(d.codigo_entrega)}</strong>
       <span class="codigo-dica">${d.tipo === 'retirada' ? 'Informe este código no balcão ao retirar seu pedido.' : 'Informe este código ao entregador quando seu pedido chegar.'}</span>
     </div>` : '';
-  /* Motoboy animado (v1.9.8): cena em CSS puro na tela do cliente enquanto o
-     pedido de entrega está ativo; ao sair pra entrega, o vento acelera. */
-  const MOTO_LEGENDAS = {
-    NOVO: 'Pedido confirmado! Nosso motoboy já está aquecendo o motor.',
-    EM_PREPARO: 'Seu açaí está sendo montado — e ele de prontidão.',
-    PRONTO: 'Pedido pronto! Só falta sair pra entrega.',
-    SAIU_ENTREGA: 'Ele já está a caminho da sua casa!',
-  };
-  const motoHTML = (d.tipo === 'entrega' && MOTO_LEGENDAS[d.status]) ? `
-    <div class="moto-cena ${d.status === 'SAIU_ENTREGA' ? 'rapido' : ''}" aria-hidden="true">
+  /* Motoboy animado (v1.9.8; v1.9.9: compacto e SÓ ao sair pra entrega —
+     pedido do Gabriel): cena em CSS puro na tela do cliente. */
+  const motoHTML = (d.tipo === 'entrega' && d.status === 'SAIU_ENTREGA') ? `
+    <div class="moto-cena rapido" aria-hidden="true">
       <span class="moto-vento v1"></span><span class="moto-vento v2"></span><span class="moto-vento v3"></span>
       <img class="moto-img" src="/img/motoboy.png" alt="">
       <span class="moto-chao"></span>
     </div>
-    <p class="moto-legenda">${MOTO_LEGENDAS[d.status]}</p>` : '';
+    <p class="moto-legenda">Ele já está a caminho da sua casa!</p>` : '';
   cont.innerHTML = `
   <div class="acomp-card">
     <div class="acomp-numero">Pedido #${d.numero}</div>

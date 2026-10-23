@@ -770,16 +770,35 @@ function mascararFone(v) {
   if (d.length > 0) return `(${d}`;
   return '';
 }
-$('#ck-whats').addEventListener('input', mascaraFoneInput);
-/* Fidelidade (v1.9.17): ao terminar de digitar o WhatsApp, o sistema
-   reconhece o cliente que voltou e mostra a novidade já no checkout. */
-$('#ck-whats').addEventListener('change', async (e) => {
+$('#ck-whats').addEventListener('input', (e) => {
+  mascaraFoneInput(e);
+  /* Trocou o numero no meio do checkout: o premio consultado era de
+     OUTRO cliente — limpa na hora pra nao mostrar desconto errado. */
+  if (fidelidadeCheckout && fidelidadeCheckout._digitos !== soDigitos(e.target.value)) {
+    fidelidadeCheckout = null;
+    $('#ck-fidelidade').hidden = true;
+    atualizarResumoCheckout();
+  }
+});
+/* Fidelidade: o estado consultado do cliente (com o digito consultado).
+   v1.16.4 (pedido do Gabriel): o desconto do premio entra JA no resumo
+   da finalizacao — taxa zerada e total menor ANTES de confirmar, igual
+   ao que o servidor aplica ao criar o pedido (a previa vem da consulta
+   publica; o servidor revalida na criacao). Antes o banner prometia
+   entrega gratis mas o total so caia DEPOIS de finalizar. */
+let fidelidadeCheckout = null;
+function premioEntregaGratisValendo() {
+  return !!(fidelidadeCheckout && fidelidadeCheckout.premio_disponivel
+    && fidelidadeCheckout.premio_tipo === 'entrega_gratis');
+}
+async function consultarFidelidadeCheckout() {
   const el = $('#ck-fidelidade');
-  const digitos = soDigitos(e.target.value);
-  if (digitos.length < 10) { el.hidden = true; return; }
+  const digitos = soDigitos($('#ck-whats').value);
+  if (digitos.length < 10) { fidelidadeCheckout = null; el.hidden = true; atualizarResumoCheckout(); return; }
   try {
     const r = await fetch(`/api/public/fidelidade/${digitos}`).then(x => x.json());
-    if (!r || !r.ativo) { el.hidden = true; return; }
+    if (!r || !r.ativo) { fidelidadeCheckout = null; el.hidden = true; atualizarResumoCheckout(); return; }
+    fidelidadeCheckout = { ...r, _digitos: digitos };
     if (r.premio_disponivel) {
       el.innerHTML = r.premio_tipo === 'entrega_gratis'
         ? '🎉 Você tem um prêmio de fidelidade: <strong>a entrega deste pedido sai grátis!</strong>'
@@ -789,20 +808,36 @@ $('#ck-whats').addEventListener('change', async (e) => {
       el.innerHTML = `💜 Que bom te ver de volta! Você já fez ${r.compras} ${r.compras === 1 ? 'compra' : 'compras'} — faltam ${r.faltam} para ganhar: <strong>${esc(r.premio_texto)}</strong>.`;
       el.hidden = false;
     } else { el.hidden = true; }
-  } catch { el.hidden = true; }
-});
+  } catch { fidelidadeCheckout = null; el.hidden = true; }
+  atualizarResumoCheckout();
+}
+/* Fidelidade (v1.9.17): ao terminar de digitar o WhatsApp, o sistema
+   reconhece o cliente que voltou e mostra a novidade já no checkout. */
+$('#ck-whats').addEventListener('change', consultarFidelidadeCheckout);
 function parseReais(txt) {
   const s = String(txt || '').replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
   const n = parseFloat(s);
   return isNaN(n) ? null : Math.round(n * 100);
 }
-function taxaAtual() {
+function taxaBruta() {
   if (tipoRecebimento === 'retirada') return 0;
   const sel = $('#ck-bairro').value;
   const b = bairros.find((x) => String(x.id) === String(sel));
   if (b) return b.taxa_centavos || 0;
   if (!bairros.length && loja && loja.taxa_unica_centavos != null) return loja.taxa_unica_centavos;
   return null; // ainda não dá para calcular
+}
+/* A taxa que VALE na finalizacao: com premio de entrega gratis
+   disponivel, ela ja entra ZERADA no resumo e no botao de confirmar —
+   espelho exato da regra do servidor (entrega + taxa > 0 + premio). */
+function taxaAtual() {
+  const t = taxaBruta();
+  if (t !== null && t > 0 && tipoRecebimento === 'entrega' && premioEntregaGratisValendo()) return 0;
+  return t;
+}
+function taxaZeradaPeloPremio() {
+  const t = taxaBruta();
+  return t !== null && t > 0 && tipoRecebimento === 'entrega' && premioEntregaGratisValendo();
 }
 /* Cupom (v1.14.0): a prévia usa tipo/valor que o SERVIDOR devolveu na
    validação; o desconto oficial é recalculado no servidor ao criar o pedido. */
@@ -862,7 +897,9 @@ function atualizarResumoCheckout() {
   const taxa = taxaAtual();
   const desconto = descontoCupom(sub);
   $('#rs-subtotal').textContent = R$(sub);
-  $('#rs-taxa').textContent = taxa === null ? 'a calcular' : (taxa === 0 ? 'Grátis' : R$(taxa));
+  $('#rs-taxa').textContent = taxa === null ? 'a calcular'
+    : (taxaZeradaPeloPremio() ? 'Grátis — prêmio de fidelidade'
+    : (taxa === 0 ? 'Grátis' : R$(taxa)));
   $('#rs-desconto-linha').hidden = desconto <= 0;
   if (desconto > 0) { $('#rs-cupom-codigo').textContent = cupomAplicado.codigo; $('#rs-desconto').textContent = '-' + R$(desconto); }
   $('#rs-total').textContent = R$(sub - desconto + (taxa || 0));
@@ -946,6 +983,9 @@ function abrirCheckout() {
   if (salvo.referencia) $('#ck-referencia').value = salvo.referencia;
   renderBairrosCheckout();
   if (salvo.bairro_id) $('#ck-bairro').value = salvo.bairro_id;
+  // WhatsApp salvo de compras anteriores: consulta a fidelidade ja na
+  // abertura, pro desconto do premio aparecer sem o cliente tocar no campo.
+  if (salvo.whatsapp) consultarFidelidadeCheckout();
   renderPagamentosCheckout();
   definirTipo('entrega');
   const erro = $('#ck-erro');

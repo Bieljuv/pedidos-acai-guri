@@ -2,6 +2,12 @@
 // Núcleo de pedidos: cardápio, cálculo no servidor, criação e máquina de estados.
 const { get, all, run, tx, execSql, modoBanco } = require('./db');
 const { tokenAleatorio, normalizaFone, lojaEstaAberta } = require('./util');
+// FALTAVA este import (v1.16.3): o ultimoPedidoDoCliente (portado da
+// linha SaaS na v1.14.0) usa lid() e este era o UNICO arquivo que
+// chamava lid() sem importar — ReferenceError em QUALQUER busca do
+// "Peca de novo", descoberto em producao em 23/10 (o E2E da epoca
+// rodou na linha limpa e nao cobriu esta rota na original).
+const { lojaId: lid } = require('./tenant');
 const notif = require('./notificacoes');
 const eventos = require('./eventos');
 const fidelidade = require('./fidelidade');

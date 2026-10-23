@@ -1739,6 +1739,7 @@ async function carregarFidelidade() {
       <td>${x.compras}</td><td>${faltam === 0 ? 'Ganhou! (ver prêmios)' : faltam}</td></tr>`;
     }).join('')}</tbody></table>`
     : '<p class="dica">Nenhuma compra entregue ainda.</p>';
+  renderSorAtivo(r.sorteios || []);
   renderSorHistorico(r.sorteios || []);
   sorAtualizarPreview();
   carregarCupons();
@@ -1998,9 +1999,8 @@ async function sorAtualizarPreview() {
   try {
     const r = await api('/api/painel/fidelidade/sorteio/participantes' + (qs.toString() ? '?' + qs : ''));
     $('#sorPreview').textContent = r.clientes
-      ? `${r.clientes} cliente(s) participam · ${r.chances} chance(s) no total (1 por compra entregue no período).`
-      : 'Nenhum cliente com compra entregue neste período — ninguém participaria. Amplie o período.';
-    $('#btnSortear').disabled = !r.clientes;
+      ? `${r.clientes} cliente(s) já participam · ${r.chances} chance(s) no total (e quem comprar no período entra também).`
+      : 'Ainda ninguém com compra entregue neste período — sem problema: quem comprar enquanto o sorteio estiver divulgado entra automaticamente.';
   } catch { $('#sorPreview').textContent = 'Não consegui conferir os participantes agora.'; }
 }
 $('#sorPeriodo').addEventListener('change', () => {
@@ -2012,12 +2012,74 @@ $('#sorPeriodo').addEventListener('change', () => {
 $('#sorIni').addEventListener('change', sorAtualizarPreview);
 $('#sorFim').addEventListener('change', sorAtualizarPreview);
 
+/* Sorteio ATIVO (v1.16.9): enquanto existe um sorteio criado e sendo
+   divulgado, o formulario some e o bloco do ativo aparece com os dois
+   botoes que importam: sortear o ganhador ou encerrar a divulgacao. */
+function renderSorAtivo(lista) {
+  const el = $('#sorAtivo');
+  const form = $('#formSorteio');
+  const ativo = (lista || []).find(s => s.status === 'ativo');
+  if (!ativo) { el.innerHTML = ''; form.classList.remove('hidden'); return; }
+  form.classList.add('hidden');
+  const periodo = ativo.periodo_ini || ativo.periodo_fim
+    ? `${ativo.periodo_ini ? fidDataFmt(ativo.periodo_ini) : 'desde o início'} até ${ativo.periodo_fim ? fidDataFmt(ativo.periodo_fim) : 'hoje'}`
+    : 'desde o início';
+  el.innerHTML = `<div class="sor-ativo-box">
+    <p class="sor-ativo-tit">Sorteio sendo divulgado pros clientes agora</p>
+    <p class="sor-ativo-nome"><strong>${esc(ativo.titulo)}</strong> — prêmio: <strong>${esc(ativo.premio_texto)}</strong></p>
+    <p class="dica">Período das compras: ${periodo} · <span id="sorAtivoParts">conferindo participantes…</span></p>
+    <div class="form-actions">
+      <button type="button" class="btn btn-primary" id="btnSorSortear">Sortear o ganhador agora</button>
+      <button type="button" class="btn btn-ghost" id="btnSorEncerrar">Encerrar divulgação</button>
+    </div>
+  </div>`;
+  (async () => {
+    try {
+      const qs = new URLSearchParams();
+      if (ativo.periodo_ini) qs.set('ini', ativo.periodo_ini);
+      if (ativo.periodo_fim) qs.set('fim', ativo.periodo_fim);
+      const r = await api('/api/painel/fidelidade/sorteio/participantes' + (qs.toString() ? '?' + qs : ''));
+      const alvo = $('#sorAtivoParts');
+      if (alvo) alvo.textContent = r.clientes
+        ? `${r.clientes} cliente(s) participando · ${r.chances} chance(s) no total.`
+        : 'ainda nenhum participante — quem comprar entregue no período entra.';
+    } catch { /* o bloco segue sem a contagem */ }
+  })();
+  $('#btnSorSortear').addEventListener('click', async () => {
+    if (!confirm(`Sortear o ganhador de "${ativo.titulo}" agora? O vale do prêmio é criado na hora pro ganhador.`)) return;
+    const btn = $('#btnSorSortear'); btn.disabled = true;
+    try {
+      const r = await api(`/api/painel/fidelidade/sorteios/${ativo.id}/sortear`, { method: 'POST', body: {} });
+      animarSorteio(r, ativo.titulo, ativo.premio_texto);
+      carregarFidelidade();
+    } catch (err) { toast(err.message || 'Não consegui sortear.', true); btn.disabled = false; }
+  });
+  $('#btnSorEncerrar').addEventListener('click', async () => {
+    if (!confirm(`Encerrar a divulgação de "${ativo.titulo}" SEM sortear? Ele sai da tela dos clientes.`)) return;
+    try {
+      await api(`/api/painel/fidelidade/sorteios/${ativo.id}/encerrar`, { method: 'POST', body: {} });
+      toast('Divulgação encerrada. O sorteio saiu da tela dos clientes.');
+      carregarFidelidade();
+    } catch (err) { toast(err.message || 'Não consegui encerrar.', true); }
+  });
+}
+
 function renderSorHistorico(lista) {
   const el = $('#sorHistorico');
-  if (!lista || !lista.length) { el.innerHTML = ''; return; }
+  const feitos = (lista || []).filter(s => s.status !== 'ativo');
+  if (!feitos.length) { el.innerHTML = ''; return; }
   el.innerHTML = `<h4 style="margin:.9rem 0 .4rem">Sorteios já feitos</h4>
     <table class="simple-table"><thead><tr><th>Data</th><th>Sorteio</th><th>Prêmio</th><th>Participantes</th><th>Ganhador(a)</th><th></th></tr></thead>
-    <tbody>${lista.map(s => {
+    <tbody>${feitos.map(s => {
+      if (s.status === 'encerrado' || !s.ganhador_whatsapp) {
+        return `<tr>
+      <td>${fidDataFmt(s.criado_em)}</td>
+      <td><strong>${esc(s.titulo)}</strong></td>
+      <td>${esc(s.premio_texto)}</td>
+      <td colspan="2"><span class="dica">Encerrado sem sorteio</span></td>
+      <td></td>
+    </tr>`;
+      }
       const msg = encodeURIComponent(`Oi, ${String(s.ganhador_nome || '').split(' ')[0]}! Aqui é da Açaí do Guri 🎉 Você ganhou o nosso sorteio "${s.titulo}": ${s.premio_texto}! Parabéns! É só fazer seu próximo pedido pelo site que o prêmio é seu.`);
       return `<tr>
       <td>${fidDataFmt(s.criado_em)}</td>
@@ -2036,15 +2098,15 @@ $('#formSorteio').addEventListener('submit', async (e) => {
   const premio = $('#sorPremio').value.trim();
   if (!titulo) { toast('Dê um título ao sorteio.', true); return; }
   if (!premio) { toast('Escreva o prêmio do sorteio.', true); return; }
-  if (!confirm(`Sortear agora "${titulo}"? O resultado fica registrado e o ganhador recebe o vale na hora.`)) return;
+  if (!confirm(`Criar "${titulo}" e divulgar pros clientes agora? Ele aparece na vitrine e na finalização da compra até você sortear ou encerrar.`)) return;
   const { ini, fim } = sorPeriodoDatas();
   $('#btnSortear').disabled = true;
   try {
-    const r = await api('/api/painel/fidelidade/sorteios', { method: 'POST', body: { titulo, premio_texto: premio, ini: ini || null, fim: fim || null } });
-    animarSorteio(r, titulo, premio);
+    await api('/api/painel/fidelidade/sorteios', { method: 'POST', body: { titulo, premio_texto: premio, ini: ini || null, fim: fim || null } });
+    toast('Sorteio criado! Ele já está sendo anunciado pros clientes na loja.');
     carregarFidelidade();
   } catch (err) {
-    toast(err.message || 'Não consegui sortear.', true);
+    toast(err.message || 'Não consegui criar o sorteio.', true);
   } finally { $('#btnSortear').disabled = false; }
 });
 

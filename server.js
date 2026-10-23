@@ -211,6 +211,8 @@ app.get('/api/public/pedidos/:token', h(async (req, res) => {
   const detalhe = await pedidosCore.detalhePedido(pedido);
   // Fidelidade: a tela de acompanhamento mostra o cartão do programa.
   try { detalhe.fidelidade = await fidelidade.statusCliente(pedido.cliente_whatsapp); } catch { /* opcional */ }
+  // Sorteio divulgado (v1.16.9): o acompanhamento avisa que ele esta participando.
+  try { const sa = await fidelidade.sorteioAtivo(); if (sa) detalhe.sorteio = { titulo: sa.titulo, premio: sa.premio_texto }; } catch { /* opcional */ }
   res.json(detalhe);
 }));
 
@@ -221,6 +223,14 @@ app.get('/api/public/ultimo-pedido/:whatsapp', h(async (req, res) => {
   if (!r) return res.json({ itens: [] });
   res.json(r);
 }));
+// Sorteio divulgado (v1.16.9): a vitrine e a finalizacao anunciam o
+// sorteio ativo pros clientes (titulo e premio, nada alem disso).
+app.get('/api/public/sorteio-ativo', h(async (req, res) => {
+  const s = await fidelidade.sorteioAtivo();
+  if (!s) return res.json({ ativo: false });
+  res.json({ ativo: true, id: s.id, titulo: s.titulo, premio: s.premio_texto, periodo_fim: s.periodo_fim || null });
+}));
+
 app.get('/api/public/fidelidade/:whatsapp', h(async (req, res) => {
   // Freio contra varredura de números (v1.9.28): 30 consultas/min por IP.
   if (!limite.permitido('fid:' + limite.ipDe(req), 30, 60 * 1000)) {
@@ -792,7 +802,19 @@ app.get('/api/painel/fidelidade/sorteio/participantes', auth, soAdmin, h(async (
   });
 }));
 app.post('/api/painel/fidelidade/sorteios', auth, soAdmin, h(async (req, res) => {
-  const r = await fidelidade.sortear(req.body || {});
+  // v1.16.9: CRIAR o sorteio (fica ativo e divulgado pros clientes) —
+  // o sorteio do ganhador e' outro passo, quando o dono mandar.
+  const r = await fidelidade.criarSorteio(req.body || {});
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
+  res.json(r);
+}));
+app.post('/api/painel/fidelidade/sorteios/:id/sortear', auth, soAdmin, h(async (req, res) => {
+  const r = await fidelidade.sortearAgora(Number(req.params.id));
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
+  res.json(r);
+}));
+app.post('/api/painel/fidelidade/sorteios/:id/encerrar', auth, soAdmin, h(async (req, res) => {
+  const r = await fidelidade.encerrarSorteio(Number(req.params.id));
   if (!r.ok) return res.status(422).json({ erro: r.erro });
   res.json(r);
 }));

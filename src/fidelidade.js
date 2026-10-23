@@ -108,6 +108,15 @@ CREATE TABLE IF NOT EXISTS sorteios (
 async function preparar() {
   try {
     await criarTabelas();
+    // Sorteio DIVULGADO (v1.16.9): a tabela sorteios ganha o status —
+    // 'ativo' (criado e sendo anunciado pros clientes), 'sorteado'
+    // (ja teve ganhador) ou 'encerrado' (divulgacao cancelada). Os
+    // sorteios antigos, que ja nasciam sorteados, leem 'sorteado'.
+    if (modoBanco() === 'sqlite') {
+      try { await execSql(`ALTER TABLE sorteios ADD COLUMN status TEXT DEFAULT 'sorteado'`); } catch { /* coluna ja existe */ }
+    } else {
+      await execSql(`ALTER TABLE sorteios ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'sorteado'`);
+    }
     await run('INSERT OR IGNORE INTO config_fidelidade (id, loja_id) VALUES (1, 1)');
   } catch (e) { console.error('[fidelidade] preparar:', e.message); }
 }
@@ -280,25 +289,54 @@ async function participantes(ini, fim) {
     GROUP BY p.cliente_whatsapp, c.nome ORDER BY compras DESC, nome`, iniTs, fimTs);
 }
 
-async function sortear({ titulo, premio_texto, ini, fim }) {
+/* Sorteio DIVULGADO (v1.16.9 — pedido do Gabriel): o certo e CRIAR o
+   sorteio primeiro; ele fica ATIVO, e anunciado pros clientes na
+   vitrine e na finalizacao da compra. O sorteio em si (escolher o
+   ganhador) acontece depois, quando o dono mandar, sobre o periodo
+   guardado na criacao. */
+async function sorteioAtivo() {
+  return get(`SELECT * FROM sorteios WHERE loja_id=1 AND status='ativo' ORDER BY id DESC LIMIT 1`);
+}
+
+async function criarSorteio({ titulo, premio_texto, ini, fim }) {
   const tit = String(titulo || '').trim().slice(0, 80);
   const premio = String(premio_texto || '').trim().slice(0, 120);
   if (!tit) return { ok: false, erro: 'Dê um título ao sorteio (ex.: Sorteio de Aniversário).' };
   if (!premio) return { ok: false, erro: 'Escreva o prêmio (ex.: 1 Combo Guri Bão grátis).' };
-  const parts = await participantes(ini || null, fim || null);
+  const ativo = await sorteioAtivo();
+  if (ativo) return { ok: false, erro: `Já existe um sorteio sendo divulgado ("${ativo.titulo}"). Sorteie ou encerre ele primeiro.` };
+  const info = await run(`INSERT INTO sorteios (loja_id, titulo, premio_texto, periodo_ini, periodo_fim, status)
+    VALUES (1, ?, ?, ?, ?, 'ativo')`,
+    tit, premio, ini || null, fim || null);
+  const id = Number(info && info.lastInsertRowid) || null;
+  return { ok: true, sorteio: await get(`SELECT * FROM sorteios WHERE loja_id=1 AND id=?`, id) };
+}
+
+async function encerrarSorteio(id) {
+  const s = await get(`SELECT * FROM sorteios WHERE loja_id=1 AND id=?`, id);
+  if (!s) return { ok: false, erro: 'Sorteio não encontrado.' };
+  if (s.status !== 'ativo') return { ok: false, erro: 'Este sorteio não está ativo.' };
+  await run(`UPDATE sorteios SET status='encerrado' WHERE id=?`, id);
+  return { ok: true };
+}
+
+async function sortearAgora(id) {
+  const s = await get(`SELECT * FROM sorteios WHERE loja_id=1 AND id=?`, id);
+  if (!s) return { ok: false, erro: 'Sorteio não encontrado.' };
+  if (s.status !== 'ativo') return { ok: false, erro: 'Este sorteio já foi encerrado.' };
+  const tit = s.titulo;
+  const premio = s.premio_texto;
+  const parts = await participantes(s.periodo_ini || null, s.periodo_fim || null);
   if (!parts.length) return { ok: false, erro: 'Nenhum cliente com compra entregue neste período. Escolha um período maior.' };
-  const totalChances = parts.reduce((s, p) => s + Number(p.compras), 0);
+  const totalChances = parts.reduce((soma, p) => soma + Number(p.compras), 0);
   let sorteado = randomInt(0, totalChances);
   let ganhador = parts[0];
   for (const p of parts) {
     if (sorteado < Number(p.compras)) { ganhador = p; break; }
     sorteado -= Number(p.compras);
   }
-  const info = await run(`INSERT INTO sorteios (loja_id, titulo, premio_texto, periodo_ini, periodo_fim, total_clientes, total_chances, ganhador_whatsapp, ganhador_nome, ganhador_chances)
-    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    tit, premio, ini || null, fim || null, parts.length, totalChances,
-    ganhador.whatsapp, ganhador.nome || null, Number(ganhador.compras));
-  const sorteioId = Number(info && info.lastInsertRowid) || null;
+  await run(`UPDATE sorteios SET status='sorteado', total_clientes=?, total_chances=?, ganhador_whatsapp=?, ganhador_nome=?, ganhador_chances=? WHERE id=?`,
+    parts.length, totalChances, ganhador.whatsapp, ganhador.nome || null, Number(ganhador.compras), s.id);
   // O vale nasce na hora (vale também se o programa estiver desligado — o
   // anúncio principal é a mensagem direta; o vale aparece quando ativo).
   try { await concederPremioAvulso(ganhador.whatsapp, ganhador.nome, `${tit}: ${premio}`); } catch { /* vale é bônus */ }
@@ -307,11 +345,18 @@ async function sortear({ titulo, premio_texto, ini, fim }) {
       `🎲 *Sorteio realizado:* ${notif.escMd(tit)}\nPrêmio: ${notif.escMd(premio)}\nGanhador(a): ${notif.escMd(ganhador.nome || 'Cliente')} (${ganhador.whatsapp}) — ${ganhador.compras} compra(s) no período, de ${parts.length} participante(s).\nO vale já foi criado no nome dele(a). É só chamar no WhatsApp e comemorar!`);
   } catch { /* idem */ }
   return {
-    ok: true, sorteio_id: sorteioId,
+    ok: true, sorteio_id: s.id,
     ganhador: { nome: ganhador.nome || 'Cliente', whatsapp: ganhador.whatsapp, chances: Number(ganhador.compras) },
     total_clientes: parts.length, total_chances: totalChances,
     participantes: parts.map(p => ({ nome: p.nome || 'Cliente', chances: Number(p.compras) })),
   };
+}
+
+// Compatibilidade: criar e sortear no mesmo passo.
+async function sortear(dados) {
+  const c = await criarSorteio(dados);
+  if (!c.ok) return c;
+  return sortearAgora(c.sorteio.id);
 }
 
 async function listarSorteios() {
@@ -323,4 +368,5 @@ module.exports = {
   premioResgatavel, consumirPremio, aoTransicionar,
   listarPremios, ranking, resgatarManual, removerPremio, TEXTO_ENTREGA_GRATIS,
   participantes, sortear, listarSorteios, concederPremioAvulso,
+  sorteioAtivo, criarSorteio, encerrarSorteio, sortearAgora,
 };

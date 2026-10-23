@@ -303,6 +303,51 @@ async function getJSON(url) {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
+/* Sorteio divulgado (v1.16.9): quando o dono cria um sorteio, ele e'
+   anunciado pro cliente em dois momentos — um aviso estilo push que
+   desliza na vitrine (da' pra fechar; nao volta pro mesmo sorteio) e
+   um aviso na finalizacao da compra. O estado fica guardado pra
+   finalizacao nao precisar consultar de novo. */
+let sorteioAtivoLoja = null;
+async function consultarSorteioAtivo() {
+  try {
+    const r = await getJSON('/api/public/sorteio-ativo');
+    if (!r || !r.ativo) { sorteioAtivoLoja = null; return; }
+    sorteioAtivoLoja = r;
+    mostrarPushSorteio(r);
+    // Se a finalizacao ja estiver aberta, o aviso entra nela tambem.
+    const ckSorteio = $('#ck-sorteio');
+    if (ckSorteio) {
+      ckSorteio.innerHTML = `${icLoja('trophy')} <strong>Sorteio rolando:</strong> ${esc(r.titulo)} — prêmio: <strong>${esc(r.premio)}</strong>. Finalizando este pedido, você participa automaticamente!`;
+      ckSorteio.hidden = false;
+    }
+  } catch { /* sorteio nunca atrapalha a compra */ }
+}
+function mostrarPushSorteio(s) {
+  let fechado = false;
+  try { fechado = localStorage.getItem('sorteio_fechado_' + s.id) === '1'; } catch { /* sem storage */ }
+  if (fechado || document.querySelector('.push-sorteio')) return;
+  const el = document.createElement('div');
+  el.className = 'push-sorteio';
+  el.innerHTML = `
+    <div class="push-sorteio-ic">${icLoja('trophy')}</div>
+    <div class="push-sorteio-txt">
+      <strong>${esc(s.titulo)}</strong>
+      <span>Concorra a: <strong>${esc(s.premio)}</strong>. Cada compra entregue vale 1 chance — pedindo por aqui, você já está participando!</span>
+    </div>
+    <button type="button" class="push-sorteio-x" aria-label="Fechar aviso do sorteio">${icLoja('x')}</button>`;
+  document.body.appendChild(el);
+  const esconder = () => { el.classList.remove('visivel'); setTimeout(() => el.remove(), 350); };
+  el.querySelector('.push-sorteio-x').addEventListener('click', () => {
+    try { localStorage.setItem('sorteio_fechado_' + s.id, '1'); } catch { /* ok */ }
+    esconder();
+  });
+  setTimeout(() => el.classList.add('visivel'), 700);
+  // Some sozinho depois de um tempo, mas isso NAO conta como "fechado":
+  // no proximo acesso ele aparece de novo (so o X dispensa de vez).
+  setTimeout(() => { if (document.body.contains(el)) esconder(); }, 14000);
+}
+
 async function iniciar() {
   atualizarCabecalho();
   try {
@@ -320,6 +365,7 @@ async function iniciar() {
     renderCardapio();
     renderBarraCarrinho();
     verificarPecaDeNovo();
+    consultarSorteioAtivo();
   } catch (e) {
     $('#hero-status').textContent = 'Não foi possível carregar a loja agora. Verifique sua conexão e recarregue a página.';
     $('#hero-status').className = 'hero-status fechada';
@@ -992,6 +1038,14 @@ function abrirCheckout() {
   // WhatsApp salvo de compras anteriores: consulta a fidelidade ja na
   // abertura, pro desconto do premio aparecer sem o cliente tocar no campo.
   if (salvo.whatsapp) consultarFidelidadeCheckout();
+  // Sorteio divulgado (v1.16.9): o aviso tambem aparece na finalizacao.
+  const ckSorteio = $('#ck-sorteio');
+  if (ckSorteio) {
+    if (sorteioAtivoLoja) {
+      ckSorteio.innerHTML = `${icLoja('trophy')} <strong>Sorteio rolando:</strong> ${esc(sorteioAtivoLoja.titulo)} — prêmio: <strong>${esc(sorteioAtivoLoja.premio)}</strong>. Finalizando este pedido, você participa automaticamente!`;
+      ckSorteio.hidden = false;
+    } else { ckSorteio.hidden = true; }
+  }
   renderPagamentosCheckout();
   definirTipo('entrega');
   const erro = $('#ck-erro');
@@ -1105,76 +1159,51 @@ const STATUS_TXT = {
 let tokenAcomp = null;
 let timerAcomp = null;
 
-/* Sons do acompanhamento (v1.16.7 — a "ousadia" do Gabriel): quando o
-   pedido SAI pra entrega, a motinho "liga e sai"; quando ENTREGUE, a
-   buzinadinha "bi-bi". Sem nenhum arquivo de audio: o som e
-   sintetizado na hora (WebAudio). Regras do navegador: som so toca
-   depois de algum toque do cliente na pagina — por isso o contexto
-   acorda no primeiro toque, e uma virada de status que acontece sem
-   toque nenhum fica esperando (ate 30s) pelo primeiro toque.
-   O cliente pode desligar no alto-falante do proprio cartao; a
+/* Sons do acompanhamento (v1.16.7; arquivos reais na v1.16.10 — o
+   Gabriel mandou os dois MP3): quando o pedido SAI pra entrega, toca
+   a moto acelerando (public/sons/moto.mp3); quando ENTREGUE, a buzina
+   (public/sons/buzina.mp3). Regra do navegador: audio so toca depois
+   de algum toque do cliente na pagina — por isso os audios sao
+   "destravados" no primeiro toque (um play em silencio), e uma virada
+   de status sem toque nenhum fica esperando (ate 30s) pelo primeiro
+   toque. O cliente pode desligar no alto-falante do proprio cartao; a
    escolha fica salva no aparelho. Nada aqui pode quebrar a tela:
    tudo em try/catch. */
-let ctxSom = null;
+const SONS_ACOMP = {
+  partida: (() => { try { const a = new Audio('/sons/moto.mp3'); a.preload = 'auto'; return a; } catch { return null; } })(),
+  buzina: (() => { try { const a = new Audio('/sons/buzina.mp3'); a.preload = 'auto'; return a; } catch { return null; } })(),
+};
+let somDestravado = false;
 let somPendente = null; // { tipo, quando }
 function somDesligado() { try { return localStorage.getItem('loja_sem_som') === '1'; } catch { return false; } }
-function garantirCtxSom() {
-  if (somDesligado()) return null;
-  try {
-    if (!ctxSom) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; ctxSom = new AC(); }
-    if (ctxSom.state === 'suspended') ctxSom.resume();
-    return ctxSom;
-  } catch { return null; }
+function destravarSom() {
+  if (somDestravado) return;
+  somDestravado = true;
+  for (const a of Object.values(SONS_ACOMP)) {
+    if (!a) continue;
+    try {
+      a.muted = true;
+      const p = a.play();
+      if (p && p.then) p.then(() => { try { a.pause(); a.currentTime = 0; a.muted = false; } catch { /* ok */ } }).catch(() => { a.muted = false; });
+    } catch { /* ok */ }
+  }
 }
 document.addEventListener('pointerdown', () => {
-  if (!garantirCtxSom()) return;
+  if (somDesligado()) return;
+  destravarSom();
   if (somPendente && Date.now() - somPendente.quando < 30000) tocarSomAcomp(somPendente.tipo);
   somPendente = null;
 }, true);
 function dispararSomAcomp(tipo) {
-  const ctx = garantirCtxSom();
-  if (!ctx || ctx.state !== 'running') { somPendente = { tipo, quando: Date.now() }; return; }
+  if (somDesligado()) return;
+  if (!somDestravado) { somPendente = { tipo, quando: Date.now() }; return; }
   tocarSomAcomp(tipo);
 }
 function tocarSomAcomp(tipo) {
-  const ctx = garantirCtxSom();
-  if (!ctx || ctx.state !== 'running') return;
-  try { if (tipo === 'partida') somPartida(ctx); else if (tipo === 'buzina') somBuzina(ctx); } catch { /* som nunca trava a tela */ }
-}
-function somPartida(ctx) {
-  const t = ctx.currentTime;
-  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.09, t + 0.1);
-  g.gain.setValueAtTime(0.09, t + 1.0);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 1.45);
-  const filtro = ctx.createBiquadFilter(); filtro.type = 'lowpass'; filtro.frequency.value = 520; filtro.Q.value = 2;
-  const osc = ctx.createOscillator(); osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(62, t);
-  osc.frequency.exponentialRampToValueAtTime(150, t + 0.55);
-  osc.frequency.exponentialRampToValueAtTime(185, t + 1.05);
-  const osc2 = ctx.createOscillator(); osc2.type = 'square';
-  osc2.frequency.setValueAtTime(31, t);
-  osc2.frequency.exponentialRampToValueAtTime(93, t + 1.05);
-  const g2 = ctx.createGain(); g2.gain.value = 0.5;
-  osc.connect(filtro); osc2.connect(g2); g2.connect(filtro);
-  filtro.connect(g); g.connect(ctx.destination);
-  osc.start(t); osc2.start(t); osc.stop(t + 1.5); osc2.stop(t + 1.5);
-}
-function somBuzina(ctx) {
-  const bip = (inicio) => {
-    const t = ctx.currentTime + inicio;
-    const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = 840;
-    const osc2 = ctx.createOscillator(); osc2.type = 'square'; osc2.frequency.value = 1180;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.12, t + 0.015);
-    g.gain.setValueAtTime(0.12, t + 0.09);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-    const g2 = ctx.createGain(); g2.gain.value = 0.35;
-    osc.connect(g); osc2.connect(g2); g2.connect(g); g.connect(ctx.destination);
-    osc.start(t); osc2.start(t); osc.stop(t + 0.16); osc2.stop(t + 0.16);
-  };
-  bip(0); bip(0.21); // bi-bi
+  if (somDesligado()) return;
+  const a = SONS_ACOMP[tipo];
+  if (!a) return;
+  try { a.currentTime = 0; const p = a.play(); if (p && p.catch) p.catch(() => { /* navegador segurou */ }); } catch { /* som nunca trava a tela */ }
 }
 
 function linhasOpcoesPedido(item) {
@@ -1321,6 +1350,7 @@ function renderAcompanhamento(d) {
       ${d.tipo === 'entrega' && !cancelado ? `<button type="button" id="btn-som-acomp" class="btn-som" aria-label="${somDesligado() ? 'Ligar os sons do acompanhamento' : 'Desligar os sons do acompanhamento'}" title="${somDesligado() ? 'Sons desligados' : 'Sons ligados'}">${icLoja(somDesligado() ? 'mudo' : 'som')}</button>` : ''}
     </div>
     <p class="acomp-status-txt">${esc(STATUS_TXT[d.status] || d.status)}</p>
+    ${d.sorteio && !cancelado ? `<p class="acomp-sorteio">${icLoja('trophy')} Você está participando do sorteio <strong>${esc(d.sorteio.titulo)}</strong> — prêmio: <strong>${esc(d.sorteio.premio)}</strong>. Boa sorte!</p>` : ''}
     ${fidelHTML}
     ${codigoHTML}
     ${cancelado ? `<div class="cancelado-box">Pedido cancelado${motivoCancel ? ` — ${esc(motivoCancel)}` : ''}.</div>` : timeline}
@@ -1348,7 +1378,7 @@ function renderAcompanhamento(d) {
   if (btnSom) btnSom.addEventListener('click', () => {
     const desligado = !somDesligado();
     try { localStorage.setItem('loja_sem_som', desligado ? '1' : '0'); } catch { /* sem storage */ }
-    if (desligado && ctxSom) { try { ctxSom.close(); } catch { /* ok */ } ctxSom = null; somPendente = null; }
+    if (desligado) { for (const a of Object.values(SONS_ACOMP)) { try { if (a) a.pause(); } catch { /* ok */ } } somPendente = null; }
     btnSom.innerHTML = icLoja(desligado ? 'mudo' : 'som');
     btnSom.title = desligado ? 'Sons desligados' : 'Sons ligados';
     toast(desligado ? 'Sons do acompanhamento desligados.' : 'Sons do acompanhamento ligados.');

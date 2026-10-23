@@ -18,5 +18,5 @@
     "dev": "node server.js"
   },
   "type": "commonjs",
-  "version": "1.16.8"
+  "version": "1.16.10"
 }

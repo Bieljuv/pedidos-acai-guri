@@ -46,6 +46,20 @@ CREATE TABLE IF NOT EXISTS fidelidade_premios (
   resgatado_em TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_premios_whats ON fidelidade_premios (whatsapp, status);
+CREATE TABLE IF NOT EXISTS sorteios (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  loja_id INTEGER NOT NULL DEFAULT 1,
+  titulo TEXT NOT NULL,
+  premio_texto TEXT NOT NULL,
+  periodo_ini TEXT,
+  periodo_fim TEXT,
+  total_clientes INTEGER NOT NULL DEFAULT 0,
+  total_chances INTEGER NOT NULL DEFAULT 0,
+  ganhador_whatsapp TEXT,
+  ganhador_nome TEXT,
+  ganhador_chances INTEGER NOT NULL DEFAULT 0,
+  criado_em TEXT DEFAULT (datetime('now'))
+);
 `);
   } else {
     await execSql(`
@@ -73,6 +87,20 @@ CREATE TABLE IF NOT EXISTS fidelidade_premios (
   resgatado_em TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_premios_whats ON fidelidade_premios (whatsapp, status);
+CREATE TABLE IF NOT EXISTS sorteios (
+  id SERIAL PRIMARY KEY,
+  loja_id INTEGER NOT NULL DEFAULT 1,
+  titulo TEXT NOT NULL,
+  premio_texto TEXT NOT NULL,
+  periodo_ini TEXT,
+  periodo_fim TEXT,
+  total_clientes INTEGER NOT NULL DEFAULT 0,
+  total_chances INTEGER NOT NULL DEFAULT 0,
+  ganhador_whatsapp TEXT,
+  ganhador_nome TEXT,
+  ganhador_chances INTEGER NOT NULL DEFAULT 0,
+  criado_em TIMESTAMPTZ DEFAULT now()
+);
 `);
   }
 }
@@ -217,8 +245,82 @@ async function removerPremio(premioId) {
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// Sorteio de promoções (v1.9.18 — fase 2 da fidelidade, ideia do Gabriel).
+// Participa quem tem compra ENTREGUE no período; cada compra = 1 chance.
+// O ganhador recebe um vale (prêmio avulso de fidelidade) automaticamente.
+// ---------------------------------------------------------------------------
+const { randomInt } = require('crypto');
+
+// Vale avulso (sorteio, cortesia...): nasce como prêmio personalizado
+// disponível; aparece na tela do cliente e na lista de prêmios do painel.
+async function concederPremioAvulso(whatsapp, nome, texto) {
+  const w = normalizaFone(whatsapp);
+  const marco = await contarEntregues(w);
+  await run(`INSERT INTO fidelidade_premios (loja_id, whatsapp, cliente_nome, marco_compras, premio_tipo, premio_texto, pedido_origem_id)
+    VALUES (1, ?, ?, ?, 'personalizado', ?, NULL)`, w, nome || null, marco, String(texto || 'Prêmio').slice(0, 120));
+}
+
+// Participantes do período [ini, fim] ('YYYY-MM-DD'): 1 chance por compra.
+// ATENÇÃO ao fuso: pedidos.created_at é UTC, mas o período é a data LOCAL da
+// loja (Brasília, UTC-3) — os limites são deslocados +3h, senão a compra das
+// 21h de hoje (00h UTC de amanhã) caía fora do "este mês".
+async function participantes(ini, fim) {
+  const iniTs = ini ? `${ini} 03:00:00` : '0001-01-01 00:00:00';
+  let fimTs = '9999-12-31 23:59:59';
+  if (fim) {
+    const d = new Date(`${fim}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    fimTs = d.toISOString().slice(0, 10) + ' 03:00:00';
+  }
+  return all(`SELECT p.cliente_whatsapp AS whatsapp, COALESCE(c.nome, MAX(p.cliente_nome)) AS nome,
+      COUNT(*) AS compras
+    FROM pedidos p LEFT JOIN clientes c ON c.loja_id=1 AND c.whatsapp = p.cliente_whatsapp
+    WHERE p.loja_id=1 AND p.status='ENTREGUE' AND p.created_at >= ? AND p.created_at < ?
+    GROUP BY p.cliente_whatsapp, c.nome ORDER BY compras DESC, nome`, iniTs, fimTs);
+}
+
+async function sortear({ titulo, premio_texto, ini, fim }) {
+  const tit = String(titulo || '').trim().slice(0, 80);
+  const premio = String(premio_texto || '').trim().slice(0, 120);
+  if (!tit) return { ok: false, erro: 'Dê um título ao sorteio (ex.: Sorteio de Aniversário).' };
+  if (!premio) return { ok: false, erro: 'Escreva o prêmio (ex.: 1 Combo Guri Bão grátis).' };
+  const parts = await participantes(ini || null, fim || null);
+  if (!parts.length) return { ok: false, erro: 'Nenhum cliente com compra entregue neste período. Escolha um período maior.' };
+  const totalChances = parts.reduce((s, p) => s + Number(p.compras), 0);
+  let sorteado = randomInt(0, totalChances);
+  let ganhador = parts[0];
+  for (const p of parts) {
+    if (sorteado < Number(p.compras)) { ganhador = p; break; }
+    sorteado -= Number(p.compras);
+  }
+  const info = await run(`INSERT INTO sorteios (loja_id, titulo, premio_texto, periodo_ini, periodo_fim, total_clientes, total_chances, ganhador_whatsapp, ganhador_nome, ganhador_chances)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    tit, premio, ini || null, fim || null, parts.length, totalChances,
+    ganhador.whatsapp, ganhador.nome || null, Number(ganhador.compras));
+  const sorteioId = Number(info && info.lastInsertRowid) || null;
+  // O vale nasce na hora (vale também se o programa estiver desligado — o
+  // anúncio principal é a mensagem direta; o vale aparece quando ativo).
+  try { await concederPremioAvulso(ganhador.whatsapp, ganhador.nome, `${tit}: ${premio}`); } catch { /* vale é bônus */ }
+  try {
+    await notif.notificarDonoTexto(
+      `🎲 *Sorteio realizado:* ${tit}\nPrêmio: ${premio}\nGanhador(a): ${ganhador.nome || 'Cliente'} (${ganhador.whatsapp}) — ${ganhador.compras} compra(s) no período, de ${parts.length} participante(s).\nO vale já foi criado no nome dele(a). É só chamar no WhatsApp e comemorar!`);
+  } catch { /* idem */ }
+  return {
+    ok: true, sorteio_id: sorteioId,
+    ganhador: { nome: ganhador.nome || 'Cliente', whatsapp: ganhador.whatsapp, chances: Number(ganhador.compras) },
+    total_clientes: parts.length, total_chances: totalChances,
+    participantes: parts.map(p => ({ nome: p.nome || 'Cliente', chances: Number(p.compras) })),
+  };
+}
+
+async function listarSorteios() {
+  return all('SELECT * FROM sorteios WHERE loja_id=1 ORDER BY id DESC LIMIT 30');
+}
+
 module.exports = {
   preparar, criarTabelas, getConfig, salvarConfig, statusCliente,
   premioResgatavel, consumirPremio, aoTransicionar,
   listarPremios, ranking, resgatarManual, removerPremio, TEXTO_ENTREGA_GRATIS,
+  participantes, sortear, listarSorteios, concederPremioAvulso,
 };

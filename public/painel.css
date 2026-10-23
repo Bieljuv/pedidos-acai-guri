@@ -472,3 +472,15 @@ tr.ponto-aberto td{background:#fdf3d8}
 :root[data-tema="escuro"] .ponto-func-head .total{color:#f2c1f7}
 :root[data-tema="escuro"] .codigo-box .codigo-rot{color:#eec9f5}
 :root[data-tema="escuro"] .guia li::marker{color:#f2c1f7}
+
+/* Sorteio (v1.9.18) — modal do ganhador */
+.sor-overlay{position:fixed;inset:0;background:rgba(31,4,33,.62);z-index:80;display:flex;align-items:center;justify-content:center;padding:1rem}
+.sor-card{background:var(--card);color:var(--ink);border-radius:18px;max-width:480px;width:100%;padding:2rem 1.6rem;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.sor-tit{font-size:1rem;font-weight:700;color:var(--violet);text-transform:uppercase;letter-spacing:.04em}
+.sor-nome{font-size:2rem;font-weight:800;margin:.7rem 0 .4rem;min-height:2.6rem;color:var(--deep);word-break:break-word}
+.sor-nome.sor-vencedor{color:var(--primary);animation:sorPulse .5s ease}
+.sor-sub{color:var(--muted);line-height:1.5}
+.sor-acoes{display:flex;gap:.6rem;justify-content:center;margin-top:1.2rem;flex-wrap:wrap}
+@keyframes sorPulse{0%{transform:scale(.92)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
+:root[data-tema="escuro"] .sor-nome{color:#F2C1F7}
+:root[data-tema="escuro"] .sor-tit{color:#d9a7e8}

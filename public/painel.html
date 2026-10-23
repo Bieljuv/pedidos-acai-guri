@@ -503,6 +503,43 @@
           <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-heart"></use></svg> Clientes que mais voltam</h3></div>
           <div id="fidRanking"><p class="dica">Carregando…</p></div>
         </div>
+
+        <div class="bloco">
+          <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Sorteio de promoções</h3></div>
+          <p class="dica">Participa quem fez compra <strong>entregue</strong> no período — cada compra vale 1 chance (quem compra mais, tem mais chance). Ao sortear, o ganhador recebe o vale automaticamente, aparece no histórico e você é avisado no Telegram.</p>
+          <form id="formSorteio">
+            <div class="grid-2">
+              <label>Título do sorteio
+                <input type="text" id="sorTitulo" maxlength="80" placeholder="Ex.: Sorteio de Aniversário">
+              </label>
+              <label>Prêmio
+                <input type="text" id="sorPremio" maxlength="120" placeholder="Ex.: 1 Combo Guri Bão grátis">
+              </label>
+            </div>
+            <div class="grid-3">
+              <label>Período das compras
+                <select id="sorPeriodo">
+                  <option value="mes">Este mês</option>
+                  <option value="mes_passado">Mês passado</option>
+                  <option value="30dias">Últimos 30 dias</option>
+                  <option value="tudo">Desde o início</option>
+                  <option value="custom">Datas à minha escolha</option>
+                </select>
+              </label>
+              <label id="sorIniWrap" class="hidden">De
+                <input type="date" id="sorIni">
+              </label>
+              <label id="sorFimWrap" class="hidden">Até
+                <input type="date" id="sorFim">
+              </label>
+            </div>
+            <p class="dica" id="sorPreview">Conferindo quem participa…</p>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="btnSortear">Sortear agora</button>
+            </div>
+          </form>
+          <div id="sorHistorico"></div>
+        </div>
       </section>
 
       <section id="view-configuracoes" class="view hidden">
@@ -727,6 +764,17 @@
 
 <div id="toasts" class="toasts"></div>
 
+<div id="sorteioModal" class="sor-overlay hidden">
+  <div class="sor-card">
+    <div class="sor-tit" id="sorModalTitulo">Sorteando…</div>
+    <div class="sor-nome" id="sorModalNome">…</div>
+    <p class="sor-sub" id="sorModalSub"></p>
+    <div class="sor-acoes hidden" id="sorModalAcoes">
+      <a class="btn btn-primary" id="sorModalZap" href="#" target="_blank" rel="noopener">Chamar o ganhador no WhatsApp</a>
+      <button type="button" class="btn btn-ghost" id="sorModalFechar">Fechar</button>
+    </div>
+  </div>
+</div>
 <script src="/painel.js"></script>
 </body>
 </html>

@@ -603,7 +603,21 @@ app.get('/api/painel/fidelidade', auth, soAdmin, h(async (req, res) => {
     config: await fidelidade.getConfig(),
     premios: await fidelidade.listarPremios(),
     ranking: await fidelidade.ranking(20),
+    sorteios: await fidelidade.listarSorteios(),
   });
+}));
+app.get('/api/painel/fidelidade/sorteio/participantes', auth, soAdmin, h(async (req, res) => {
+  const parts = await fidelidade.participantes(String(req.query.ini || '') || null, String(req.query.fim || '') || null);
+  res.json({
+    clientes: parts.length,
+    chances: parts.reduce((s, p) => s + Number(p.compras), 0),
+    participantes: parts.map(p => ({ nome: p.nome || 'Cliente', whatsapp: p.whatsapp, compras: Number(p.compras) })),
+  });
+}));
+app.post('/api/painel/fidelidade/sorteios', auth, soAdmin, h(async (req, res) => {
+  const r = await fidelidade.sortear(req.body || {});
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
+  res.json(r);
 }));
 app.put('/api/painel/fidelidade/config', auth, soAdmin, h(async (req, res) => {
   res.json(await fidelidade.salvarConfig(req.body || {}));

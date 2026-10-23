@@ -1498,6 +1498,8 @@ async function carregarFidelidade() {
       <td>${x.compras}</td><td>${faltam === 0 ? 'Ganhou! (ver prêmios)' : faltam}</td></tr>`;
     }).join('')}</tbody></table>`
     : '<p class="dica">Nenhuma compra entregue ainda.</p>';
+  renderSorHistorico(r.sorteios || []);
+  sorAtualizarPreview();
 }
 $('#formFidelidade').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1528,6 +1530,118 @@ document.addEventListener('click', async (e) => {
     carregarFidelidade();
   }
 });
+
+// ---------------- Sorteio de promoções (v1.9.18) ----------------
+function sorFmtData(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function sorPeriodoDatas() {
+  const tipo = $('#sorPeriodo').value;
+  const hoje = new Date();
+  if (tipo === 'tudo') return { ini: '', fim: '' };
+  if (tipo === 'custom') return { ini: $('#sorIni').value || '', fim: $('#sorFim').value || '' };
+  if (tipo === 'mes') return { ini: sorFmtData(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), fim: sorFmtData(hoje) };
+  if (tipo === 'mes_passado') {
+    return {
+      ini: sorFmtData(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)),
+      fim: sorFmtData(new Date(hoje.getFullYear(), hoje.getMonth(), 0)),
+    };
+  }
+  const ini = new Date(hoje); ini.setDate(ini.getDate() - 29);
+  return { ini: sorFmtData(ini), fim: sorFmtData(hoje) };
+}
+async function sorAtualizarPreview() {
+  const { ini, fim } = sorPeriodoDatas();
+  const qs = new URLSearchParams();
+  if (ini) qs.set('ini', ini);
+  if (fim) qs.set('fim', fim);
+  try {
+    const r = await api('/api/painel/fidelidade/sorteio/participantes' + (qs.toString() ? '?' + qs : ''));
+    $('#sorPreview').textContent = r.clientes
+      ? `${r.clientes} cliente(s) participam · ${r.chances} chance(s) no total (1 por compra entregue no período).`
+      : 'Nenhum cliente com compra entregue neste período — ninguém participaria. Amplie o período.';
+    $('#btnSortear').disabled = !r.clientes;
+  } catch { $('#sorPreview').textContent = 'Não consegui conferir os participantes agora.'; }
+}
+$('#sorPeriodo').addEventListener('change', () => {
+  const custom = $('#sorPeriodo').value === 'custom';
+  $('#sorIniWrap').classList.toggle('hidden', !custom);
+  $('#sorFimWrap').classList.toggle('hidden', !custom);
+  sorAtualizarPreview();
+});
+$('#sorIni').addEventListener('change', sorAtualizarPreview);
+$('#sorFim').addEventListener('change', sorAtualizarPreview);
+
+function renderSorHistorico(lista) {
+  const el = $('#sorHistorico');
+  if (!lista || !lista.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<h4 style="margin:.9rem 0 .4rem">Sorteios já feitos</h4>
+    <table class="simple-table"><thead><tr><th>Data</th><th>Sorteio</th><th>Prêmio</th><th>Participantes</th><th>Ganhador(a)</th><th></th></tr></thead>
+    <tbody>${lista.map(s => {
+      const msg = encodeURIComponent(`Oi, ${String(s.ganhador_nome || '').split(' ')[0]}! Aqui é da Açaí do Guri 🎉 Você ganhou o nosso sorteio "${s.titulo}": ${s.premio_texto}! Parabéns! É só fazer seu próximo pedido pelo site que o prêmio é seu.`);
+      return `<tr>
+      <td>${fidDataFmt(s.criado_em)}</td>
+      <td><strong>${esc(s.titulo)}</strong></td>
+      <td>${esc(s.premio_texto)}</td>
+      <td>${s.total_clientes} cliente(s) · ${s.total_chances} chance(s)</td>
+      <td><strong>${esc(s.ganhador_nome || 'Cliente')}</strong><br><span class="dica">${esc(fidFone(s.ganhador_whatsapp))} · tinha ${s.ganhador_chances} chance(s)</span></td>
+      <td class="acoes-cell"><a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://wa.me/${String(s.ganhador_whatsapp || '').replace(/\D/g, '')}?text=${msg}">WhatsApp</a></td>
+    </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+$('#formSorteio').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const titulo = $('#sorTitulo').value.trim();
+  const premio = $('#sorPremio').value.trim();
+  if (!titulo) { toast('Dê um título ao sorteio.', true); return; }
+  if (!premio) { toast('Escreva o prêmio do sorteio.', true); return; }
+  if (!confirm(`Sortear agora "${titulo}"? O resultado fica registrado e o ganhador recebe o vale na hora.`)) return;
+  const { ini, fim } = sorPeriodoDatas();
+  $('#btnSortear').disabled = true;
+  try {
+    const r = await api('/api/painel/fidelidade/sorteios', { method: 'POST', body: { titulo, premio_texto: premio, ini: ini || null, fim: fim || null } });
+    animarSorteio(r, titulo, premio);
+    carregarFidelidade();
+  } catch (err) {
+    toast(err.message || 'Não consegui sortear.', true);
+  } finally { $('#btnSortear').disabled = false; }
+});
+
+function animarSorteio(r, titulo, premio) {
+  const modal = $('#sorteioModal');
+  const nomeEl = $('#sorModalNome');
+  const subEl = $('#sorModalSub');
+  const acoes = $('#sorModalAcoes');
+  $('#sorModalTitulo').textContent = titulo;
+  subEl.textContent = `${r.total_clientes} participante(s) · ${r.total_chances} chance(s)`;
+  acoes.classList.add('hidden');
+  modal.classList.remove('hidden');
+  // Lista de exibição ponderada (quem tem mais compras aparece mais).
+  const exibicao = [];
+  for (const p of r.participantes) for (let i = 0; i < Math.min(p.chances, 6); i++) exibicao.push(p.nome);
+  if (!exibicao.length) exibicao.push(r.ganhador.nome);
+  let atraso = 55;
+  const girar = () => {
+    nomeEl.textContent = exibicao[Math.floor(Math.random() * exibicao.length)];
+    atraso *= 1.13;
+    if (atraso < 480) setTimeout(girar, atraso);
+    else {
+      nomeEl.textContent = r.ganhador.nome;
+      nomeEl.classList.add('sor-vencedor');
+      $('#sorModalTitulo').textContent = 'Temos um(a) ganhador(a)!';
+      subEl.innerHTML = `Prêmio: <strong>${esc(premio)}</strong> · o vale já está no nome dele(a) e você foi avisado no Telegram.`;
+      const msg = encodeURIComponent(`Oi, ${String(r.ganhador.nome || '').split(' ')[0]}! Aqui é da Açaí do Guri 🎉 Você ganhou o nosso sorteio "${titulo}": ${premio}! Parabéns! É só fazer seu próximo pedido pelo site que o prêmio é seu.`);
+      $('#sorModalZap').href = `https://wa.me/${String(r.ganhador.whatsapp || '').replace(/\D/g, '')}?text=${msg}`;
+      acoes.classList.remove('hidden');
+    }
+  };
+  nomeEl.classList.remove('sor-vencedor');
+  girar();
+}
+$('#sorModalFechar').addEventListener('click', () => $('#sorteioModal').classList.add('hidden'));
+$('#sorteioModal').addEventListener('click', (e) => { if (e.target.id === 'sorteioModal') e.target.classList.add('hidden'); });
 
 async function carregarFinanceiro() {
   if (!state.finData) state.finData = hojeLocal();

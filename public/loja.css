@@ -102,7 +102,10 @@ body.rolou .hnome{opacity:1;transform:none}
   color:#fff; text-decoration:none; font-weight:700; font-size:14px;
   background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25);
   padding:10px 16px; border-radius:999px; min-height:44px; display:inline-flex; align-items:center;
-}
+  transition:background .25s ease,border-color .25s ease}
+/* Hover com a cor de cada marca (v1.13.12) */
+#hero-zap:hover{background:#25D366;border-color:#25D366}
+#hero-insta:hover{background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);border-color:transparent}
 
 /* ===== Conteúdo ===== */
 .conteudo{max-width:680px;margin:0 auto;padding:0 14px}

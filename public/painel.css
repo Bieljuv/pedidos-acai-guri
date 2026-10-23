@@ -53,7 +53,7 @@ h3.view-h{margin-bottom:.4rem}
 /* ---------- layout ---------- */
 .app{display:flex;min-height:100vh}
 .sidebar{width:268px;flex:none;background:linear-gradient(180deg,var(--deep),var(--night));color:#fff;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
-.brand{display:flex;flex-direction:column;gap:.3rem;align-items:flex-start;padding:.55rem .9rem;border-bottom:1px solid rgba(255,255,255,.14)}
+.brand{display:flex;flex-direction:column;gap:.3rem;align-items:flex-start;padding:.55rem .9rem}
 .brand img{width:86px;max-width:100%;height:auto;border-radius:12px;object-fit:contain}
 .brand-nome{font-weight:800;font-size:1rem;line-height:1.1}
 .brand-sub{font-size:.75rem;opacity:.75}
@@ -69,7 +69,7 @@ h3.view-h{margin-bottom:.4rem}
 .acc-arrow{margin-left:auto;transition:.2s}
 .menu-acc[aria-expanded="true"] .acc-arrow{transform:rotate(90deg)}
 .badge-count{background:var(--accent);color:#fff;border-radius:999px;font-size:.72rem;padding:.05rem .45rem;margin-left:auto;font-weight:800}
-.side-footer{margin-top:auto;padding:.6rem .8rem;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-direction:column;gap:.32rem}
+.side-footer{margin-top:auto;padding:.6rem .8rem;display:flex;flex-direction:column;gap:.32rem}
 .side-user{font-size:.88rem;margin-bottom:.2rem}
 .side-footer .btn{color:#fff;border-color:rgba(255,255,255,.35);padding:.45rem .7rem;font-size:.88rem}
 .side-footer .btn:hover{background:rgba(255,255,255,.12)}
@@ -202,13 +202,14 @@ h3.view-h{margin-bottom:.4rem}
 /* formulários (recebimentos / loja) */
 .card-form{background:#fff;border:1px solid var(--linha);border-radius:14px;padding:1.1rem;margin-bottom:1rem;max-width:760px}
 .card-form h4{margin-bottom:.7rem}
-.uploads-row{display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:1rem}
-.upload-box{display:flex;flex-direction:column;gap:.45rem;align-items:flex-start}
+.uploads-row{display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:1rem;align-items:stretch}
+.upload-box{display:flex;flex-direction:column;gap:.45rem;align-items:flex-start;max-width:290px}
 .upload-titulo{font-size:.85rem;font-weight:700}
 .upload-preview{background:#f4ecf8;border:1px dashed #cbbbd4;object-fit:cover}
-.upload-preview.logo{width:190px;height:126px;border-radius:16px;object-fit:contain;background:#2A0530}
-.upload-preview.capa{width:230px;height:110px;border-radius:12px}
-.upload-acoes{display:flex;gap:8px;align-items:center}
+.upload-preview.logo{width:190px;height:132px;border-radius:16px;object-fit:contain;background:#2A0530}
+.upload-preview.capa{width:230px;height:132px;border-radius:12px}
+.upload-acoes{display:flex;gap:8px;align-items:center;margin-top:auto}
+.upload-box .dica{min-height:2.9em}
 .upload-btn{cursor:pointer}
 
 /* relatório */
@@ -512,7 +513,8 @@ tr.ponto-aberto td{background:#fdf3d8}
   body:not(.menu-fixado) .sidebar:hover{width:268px;box-shadow:14px 0 34px rgba(34,0,46,.35)}
   /* recolhido: logo vira só a marca, nome some, rodapé vira ícones */
   .sidebar .brand img{transition:width .28s ease}
-  body:not(.menu-fixado) .sidebar:not(:hover) .brand img{width:44px}
+  body:not(.menu-fixado) .sidebar:not(:hover) .brand{padding-left:.4rem;padding-right:.4rem}
+  body:not(.menu-fixado) .sidebar:not(:hover) .brand img{width:58px}
   body:not(.menu-fixado) .sidebar:not(:hover) .brand>div{opacity:0}
   .sidebar .brand>div{transition:opacity .18s ease}
   body:not(.menu-fixado) .sidebar:not(:hover) .side-footer .btn{border-color:transparent;background:transparent}

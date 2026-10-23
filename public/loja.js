@@ -267,7 +267,7 @@ function renderLoja() {
     const a = $('#hero-insta');
     const user = String(loja.instagram).replace(/^@/, '');
     a.href = 'https://www.instagram.com/' + user + '/';
-    a.innerHTML = icLoja('camera') + ' @' + esc(user);
+    a.innerHTML = icLoja('instagram') + ' @' + esc(user);
     a.hidden = false;
   }
   if (loja.whatsapp) {

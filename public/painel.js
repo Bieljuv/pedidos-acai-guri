@@ -1605,17 +1605,31 @@ $('#btnPush').addEventListener('click', async () => {
     else toast((r && r.erro) || 'Falha ao enviar o teste.', true);
     return;
   }
+  // v1.9.21: cada passo é nomeado — se algo falhar, o aviso diz ONDE (a
+  // chave vem ANTES da permissão: erro de servidor aparece sem gastar o
+  // pedido de permissão do navegador).
+  let passo = 'buscar a chave no servidor';
   try {
+    let chave = null;
+    if (!sub) {
+      const respChave = await api('/api/painel/push/chave');
+      chave = respChave && respChave.chave;
+      if (!chave) throw new Error('o servidor não devolveu a chave');
+    }
+    passo = 'pedir a sua permissão';
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') { toast('Sem a sua permissão, o aviso não chega com a tela bloqueada.', true); return; }
     if (!sub) {
-      const respChave = await api('/api/painel/push/chave');
-      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidParaBytes(respChave.chave) });
+      passo = 'inscrever o aparelho no serviço de push';
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidParaBytes(chave) });
     }
+    passo = 'salvar a inscrição no servidor';
     await api('/api/painel/push/inscrever', { method: 'POST', body: { subscription: sub.toJSON() } });
     toast('Notificações ativadas neste aparelho! Pedido novo agora apita até com a tela bloqueada.');
     estadoBotaoPush();
-  } catch (e) { toast('Não consegui ativar: ' + (e.message || e), true); }
+  } catch (e) {
+    toast(`Não consegui ativar (passo: ${passo}): ${e.message || e} — endereço: ${location.origin}`, true);
+  }
 });
 
 // ---------------- Sorteio de promoções (v1.9.18) ----------------

@@ -4,6 +4,7 @@ const { get, all, run, tx, execSql, modoBanco } = require('./db');
 const { tokenAleatorio, normalizaFone, lojaEstaAberta } = require('./util');
 const notif = require('./notificacoes');
 const eventos = require('./eventos');
+const fidelidade = require('./fidelidade');
 
 const TRANSICOES = {
   NOVO: ['EM_PREPARO', 'CANCELADO'],
@@ -143,6 +144,16 @@ async function criarPedido(corpo) {
     if (!corpo.endereco || !corpo.endereco.rua || !corpo.endereco.numero) throw new Error('Informe rua e número para a entrega.');
   }
 
+  // Fidelidade (v1.9.17): prêmio "entrega grátis" esperando resgate zera a
+  // taxa deste pedido. Só consome se realmente economizar (taxa > 0).
+  let premioFidelidadeId = null;
+  if (tipo === 'entrega' && taxa > 0) {
+    try {
+      const premio = await fidelidade.premioResgatavel(whats);
+      if (premio) { premioFidelidadeId = premio.id; taxa = 0; }
+    } catch { /* fidelidade nunca trava a venda */ }
+  }
+
   const itensCalc = [];
   for (const item of corpo.itens) itensCalc.push(await precificarItem(item));
   const subtotal = itensCalc.reduce((s, i) => s + i.subtotal, 0);
@@ -188,6 +199,9 @@ async function criarPedido(corpo) {
 
   const pedido = await getPedido(pedidoId);
   const itens = await getItensPedido(pedidoId);
+  if (premioFidelidadeId) {
+    try { await fidelidade.consumirPremio(premioFidelidadeId, pedidoId); } catch { /* idem */ }
+  }
   await notif.notificarNovoPedido(pedido, itens);
   eventos.emitir('pedido', { acao: 'novo', pedido_id: pedidoId, numero });
   return { pedido, itens };
@@ -264,6 +278,8 @@ async function transicionar(pedidoId, para, { origem = 'painel', motivo = null, 
   }
   const atualizado = await getPedido(pedidoId);
   await notif.notificarTransicao(atualizado, para);
+  // Fidelidade: entregar pode desbloquear prêmio; cancelar devolve o prêmio.
+  try { await fidelidade.aoTransicionar(atualizado, para); } catch { /* nunca trava */ }
   eventos.emitir('pedido', { acao: 'transicao', pedido_id: pedidoId, numero: pedido.numero, para });
   return { ok: true, pedido: atualizado };
 }

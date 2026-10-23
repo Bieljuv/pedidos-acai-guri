@@ -201,7 +201,6 @@ function renderLoja() {
   $('#hdr-nome').textContent = loja.nome;
   $('#hero-nome').textContent = loja.nome;
   if (loja.logo_url) {
-    const hl = $('#hdr-logo'); hl.src = loja.logo_url; hl.hidden = false;
     const gl = $('#hero-logo'); gl.src = loja.logo_url; gl.hidden = false;
   }
   const aberta = !!loja.aberta && !loja.pausada;
@@ -234,6 +233,16 @@ function renderLoja() {
     a.hidden = false;
   }
   if (loja.endereco_texto) $('#rodape-endereco').textContent = loja.endereco_texto;
+  // v1.9.15/16: nome fantasia + CNPJ/CPF no rodapé (quando a loja cadastrou
+  // o documento; razão social não entra — decisão do Gabriel).
+  if (loja.documento) {
+    const d = String(loja.documento || '').replace(/\D/g, '');
+    let docFmt = d;
+    if (d.length === 14) docFmt = d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+    else if (d.length === 11) docFmt = d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    const rotulo = d.length === 11 ? 'CPF' : 'CNPJ';
+    if (d) $('#rodape-documento').textContent = `${loja.nome} · ${rotulo} ${docFmt}`;
+  }
 
   const banner = $('#banner-fechada');
   if (!aberta) {
@@ -583,6 +592,26 @@ function mascararFone(v) {
   return '';
 }
 $('#ck-whats').addEventListener('input', (e) => { e.target.value = mascararFone(e.target.value); });
+/* Fidelidade (v1.9.17): ao terminar de digitar o WhatsApp, o sistema
+   reconhece o cliente que voltou e mostra a novidade já no checkout. */
+$('#ck-whats').addEventListener('change', async (e) => {
+  const el = $('#ck-fidelidade');
+  const digitos = soDigitos(e.target.value);
+  if (digitos.length < 10) { el.hidden = true; return; }
+  try {
+    const r = await fetch(`/api/public/fidelidade/${digitos}`).then(x => x.json());
+    if (!r || !r.ativo) { el.hidden = true; return; }
+    if (r.premio_disponivel) {
+      el.innerHTML = r.premio_tipo === 'entrega_gratis'
+        ? '🎉 Você tem um prêmio de fidelidade: <strong>a entrega deste pedido sai grátis!</strong>'
+        : `🎉 Você tem um prêmio de fidelidade esperando: <strong>${esc(r.premio_texto)}</strong> — a loja já está avisada.`;
+      el.hidden = false;
+    } else if (r.compras >= 1) {
+      el.innerHTML = `💜 Que bom te ver de volta! Você já fez ${r.compras} ${r.compras === 1 ? 'compra' : 'compras'} — faltam ${r.faltam} para ganhar: <strong>${esc(r.premio_texto)}</strong>.`;
+      el.hidden = false;
+    } else { el.hidden = true; }
+  } catch { el.hidden = true; }
+});
 function parseReais(txt) {
   const s = String(txt || '').replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
   const n = parseFloat(s);
@@ -888,6 +917,35 @@ function renderAcompanhamento(d) {
     </div>` : '';
   /* Motoboy animado (v1.9.8; v1.9.9: compacto e SÓ ao sair pra entrega —
      pedido do Gabriel): cena em CSS puro na tela do cliente. */
+  /* Fidelidade (v1.9.17): cartão do programa — prêmio ganho, boas-vindas de
+     quem voltou (com o progresso até a meta) ou apresentação p/ a 1ª compra. */
+  const f = d.fidelidade;
+  let fidelHTML = '';
+  if (f && f.ativo && !cancelado) {
+    const primeiroNome = String(d.cliente_nome || '').trim().split(' ')[0];
+    if (f.premio) {
+      fidelHTML = `<div class="fidel-card ganhou">
+        <div class="fidel-tit">${icLoja('trophy')} Você ganhou um prêmio!</div>
+        <p class="fidel-premio"><strong>${esc(f.premio.texto)}</strong></p>
+        <p class="fidel-sub">${f.premio.tipo === 'entrega_gratis'
+          ? 'Ele entra sozinho no seu próximo pedido — é só pedir de novo por aqui.'
+          : 'É só fazer seu próximo pedido por aqui e avisar a loja que você tem um prêmio de fidelidade.'}</p>
+      </div>`;
+    } else if (f.compras >= 1) {
+      const dots = Array.from({ length: f.meta }, (_, i) => `<span class="fidel-dot ${i < f.no_ciclo ? 'on' : ''}"></span>`).join('');
+      fidelHTML = `<div class="fidel-card">
+        <div class="fidel-tit">${icLoja('trophy')} Programa de fidelidade</div>
+        <p>Que bom te ver de volta${primeiroNome ? ', ' + esc(primeiroNome) : ''}! Sinal de que gostou.</p>
+        <div class="fidel-dots">${dots}</div>
+        <p class="fidel-sub">Você já fez ${f.compras} ${f.compras === 1 ? 'compra' : 'compras'} com a gente. Faltam ${f.faltam} para ganhar: <strong>${esc(f.premio_texto)}</strong>.</p>
+      </div>`;
+    } else {
+      fidelHTML = `<div class="fidel-card">
+        <div class="fidel-tit">${icLoja('trophy')} Programa de fidelidade</div>
+        <p class="fidel-sub">A cada ${f.meta} compras entregues, você ganha: <strong>${esc(f.premio_texto)}</strong>. Esta já é a sua compra nº 1 — está valendo!</p>
+      </div>`;
+    }
+  }
   const motoHTML = (d.tipo === 'entrega' && d.status === 'SAIU_ENTREGA') ? `
     <div class="moto-cena rapido" aria-hidden="true">
       <span class="moto-vento v1"></span><span class="moto-vento v2"></span><span class="moto-vento v3"></span>
@@ -900,6 +958,7 @@ function renderAcompanhamento(d) {
     <div class="acomp-numero">Pedido #${d.numero}</div>
     <p class="acomp-status-txt">${esc(STATUS_TXT[d.status] || d.status)}</p>
     ${motoHTML}
+    ${fidelHTML}
     ${codigoHTML}
     ${cancelado ? `<div class="cancelado-box">Pedido cancelado${motivoCancel ? ` — ${esc(motivoCancel)}` : ''}.</div>` : timeline}
     ${pagHTML}

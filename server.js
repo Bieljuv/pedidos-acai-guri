@@ -15,6 +15,7 @@ const pedidosCore = require('./src/pedidos');
 const financeiro = require('./src/financeiro');
 const equipe = require('./src/equipe');
 const entregadores = require('./src/entregadores');
+const fidelidade = require('./src/fidelidade');
 const notif = require('./src/notificacoes');
 const pagamentos = require('./src/pagamentos');
 const comanda = require('./src/comanda');
@@ -30,7 +31,7 @@ app.use(express.json({ limit: '1mb' }));
 // notificações). TODA rota /api aguarda essa promise — no SQLite é imediata;
 // no Postgres (Supabase) é o que garante schema conferido e seed aplicado
 // antes da primeira resposta. Se rejeitar, a API responde 500 com a causa.
-const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
+const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await fidelidade.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
 pronto.catch((e) => console.error('[banco]', e.message));
 app.use('/api', async (req, res, next) => {
   try { await pronto; next(); }
@@ -96,6 +97,7 @@ app.get('/api/public/loja', h(async (req, res) => {
   res.json({
     id: loja.id, nome: loja.nome, logo_url: loja.logo_url, capa_url: loja.capa_url,
     whatsapp: loja.whatsapp, instagram: loja.instagram, endereco_texto: loja.endereco_texto,
+    documento: loja.documento || null,
     tempo_preparo_min: loja.tempo_preparo_min, tempo_entrega_min: loja.tempo_entrega_min,
     pedido_minimo_centavos: loja.pedido_minimo_centavos, taxa_unica_centavos: loja.taxa_unica_centavos,
     chave_pix: chavePix, aberta: estado.aberta, pausada: estado.pausada, mensagem_status: estado.mensagem,
@@ -132,7 +134,23 @@ app.post('/api/public/pedidos', h(async (req, res) => {
 app.get('/api/public/pedidos/:token', h(async (req, res) => {
   const pedido = await get('SELECT * FROM pedidos WHERE token=?', req.params.token);
   if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
-  res.json(await pedidosCore.detalhePedido(pedido));
+  const detalhe = await pedidosCore.detalhePedido(pedido);
+  // Fidelidade: a tela de acompanhamento mostra o cartão do programa.
+  try { detalhe.fidelidade = await fidelidade.statusCliente(pedido.cliente_whatsapp); } catch { /* opcional */ }
+  res.json(detalhe);
+}));
+
+// Fidelidade pública (checkout): o cliente digita o próprio número e o
+// sistema reconhece. Resposta mínima: contagem, meta e prêmio aguardando.
+app.get('/api/public/fidelidade/:whatsapp', h(async (req, res) => {
+  const st = await fidelidade.statusCliente(req.params.whatsapp);
+  if (!st.ativo) return res.json({ ativo: false });
+  res.json({
+    ativo: true, compras: st.compras, meta: st.meta, faltam: st.faltam,
+    premio_texto: st.premio_texto,
+    premio_disponivel: !!st.premio,
+    premio_tipo: st.premio ? st.premio.tipo : null,
+  });
 }));
 
 // ---------------- Webhooks públicos ----------------
@@ -245,7 +263,8 @@ app.post('/api/painel/pedidos/:id/imprimir', auth, h(async (req, res) => {
   const p = await pedidosCore.getPedido(Number(req.params.id));
   if (!p) return res.status(404).json({ erro: 'Pedido não encontrado.' });
   const detalhe = await pedidosCore.detalhePedido(p);
-  const texto = comanda.montarComanda(detalhe);
+  const loja = await pedidosCore.getLoja();
+  const texto = comanda.montarComanda(detalhe, loja);
   let impressaoStatus = 'registrada';
   if (process.env.IMPRESSORA_IP) {
     const r = await comanda.enviarParaImpressora(texto);
@@ -373,8 +392,10 @@ app.post('/api/painel/upload', auth, soAdmin, upload.single('arquivo'), async (r
 // ---------------- Painel: loja ----------------
 app.get('/api/painel/loja', auth, h(async (req, res) => res.json(await pedidosCore.getLoja())));
 app.patch('/api/painel/loja', auth, soAdmin, h(async (req, res) => {
-  const campos = ['nome', 'logo_url', 'capa_url', 'whatsapp', 'instagram', 'endereco_texto', 'tempo_preparo_min', 'tempo_entrega_min', 'pedido_minimo_centavos', 'taxa_unica_centavos', 'chave_pix', 'email_pedidos', 'aberta_manual', 'horario_abre', 'horario_fecha', 'som_pedido'];
+  const campos = ['nome', 'logo_url', 'capa_url', 'whatsapp', 'instagram', 'endereco_texto', 'tempo_preparo_min', 'tempo_entrega_min', 'pedido_minimo_centavos', 'taxa_unica_centavos', 'chave_pix', 'documento', 'email_pedidos', 'aberta_manual', 'horario_abre', 'horario_fecha', 'som_pedido'];
   const corpo = req.body || {};
+  // documento guarda só os dígitos (a máscara é aplicada na exibição)
+  if (corpo.documento !== undefined) corpo.documento = String(corpo.documento || '').replace(/\D/g, '').slice(0, 14) || null;
   const usar = campos.filter(c => corpo[c] !== undefined);
   if (usar.length) {
     const vals = usar.map(c => (typeof corpo[c] === 'boolean' ? (corpo[c] ? 1 : 0) : corpo[c]));
@@ -574,6 +595,26 @@ app.put('/api/painel/entregadores/config', auth, soAdmin, h(async (req, res) => 
 }));
 app.post('/api/painel/entregadores/testar', auth, soAdmin, h(async (req, res) => {
   res.json(await entregadores.testar());
+}));
+
+// ---------------- Painel: Fidelidade (v1.9.17, só admin) ----------------
+app.get('/api/painel/fidelidade', auth, soAdmin, h(async (req, res) => {
+  res.json({
+    config: await fidelidade.getConfig(),
+    premios: await fidelidade.listarPremios(),
+    ranking: await fidelidade.ranking(20),
+  });
+}));
+app.put('/api/painel/fidelidade/config', auth, soAdmin, h(async (req, res) => {
+  res.json(await fidelidade.salvarConfig(req.body || {}));
+}));
+app.post('/api/painel/fidelidade/premios/:id/resgatar', auth, soAdmin, h(async (req, res) => {
+  const r = await fidelidade.resgatarManual(Number(req.params.id), (req.body || {}).pedido_id || null);
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
+  res.json(r);
+}));
+app.delete('/api/painel/fidelidade/premios/:id', auth, soAdmin, h(async (req, res) => {
+  res.json(await fidelidade.removerPremio(Number(req.params.id)));
 }));
 
 // ---------------- Painel: Equipe + Ponto (v1.8) ----------------

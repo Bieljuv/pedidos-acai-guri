@@ -192,7 +192,7 @@ const TITULOS = {
   pedidos: 'Pedidos', cardapio: 'Cardápio', grupos: 'Grupos e Opções', bairros: 'Bairros e Taxas',
   'rec-presencial': 'Meios de Recebimento — Presencial', 'rec-mp': 'Meios de Recebimento — Mercado Pago',
   'rec-asaas': 'Meios de Recebimento — Asaas', loja: 'Loja e Aparência', relatorio: 'Relatório do Dia',
-  contabil: 'Contábil', financeiro: 'Financeiro', configuracoes: 'Configurações', equipe: 'Equipe',
+  contabil: 'Contábil', financeiro: 'Financeiro', fidelidade: 'Fidelidade', configuracoes: 'Configurações', equipe: 'Equipe',
 };
 function irPara(view) {
   state.view = view;
@@ -210,6 +210,7 @@ function irPara(view) {
   if (view === 'relatorio') carregarRelatorioDia();
   if (view === 'contabil') carregarRelatorioMes();
   if (view === 'financeiro') carregarFinanceiro();
+  if (view === 'fidelidade') carregarFidelidade();
   if (view === 'configuracoes') carregarConfiguracoes();
   if (view === 'equipe') { carregarEquipe(); carregarPontoRelatorio(); }
 }
@@ -225,6 +226,12 @@ $('#accRecebBtn').addEventListener('click', () => {
 /* ---------- Loja: topo (aberta / pausar / saúde) ---------- */
 function lojaAbertaCalc(l) {
   return l && l.aberta !== undefined ? !!l.aberta : !!(l && l.aberta_manual);
+}
+function fmtDocumento(doc) {
+  const d = String(doc || '').replace(/\D/g, '');
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  return d;
 }
 async function carregarLoja() {
   try {
@@ -1228,6 +1235,7 @@ function preencherLoja() {
   $('#lojaWhatsapp').value = l.whatsapp || '';
   $('#lojaInstagram').value = l.instagram || '';
   $('#lojaEndereco').value = l.endereco_texto || '';
+  $('#lojaDocumento').value = fmtDocumento(l.documento);
   $('#lojaTempoPreparo').value = l.tempo_preparo_min ?? '';
   $('#lojaTempoEntrega').value = l.tempo_entrega_min ?? '';
   setMoney($('#lojaPedidoMinimo'), l.pedido_minimo_centavos || 0);
@@ -1261,6 +1269,7 @@ $('#formLoja').addEventListener('submit', async (e) => {
     whatsapp: $('#lojaWhatsapp').value.replace(/\D/g, ''),
     instagram: $('#lojaInstagram').value.trim(),
     endereco_texto: $('#lojaEndereco').value.trim(),
+    documento: $('#lojaDocumento').value.replace(/\D/g, ''),
     tempo_preparo_min: Number($('#lojaTempoPreparo').value) || 0,
     tempo_entrega_min: Number($('#lojaTempoEntrega').value) || 0,
     pedido_minimo_centavos: getMoney($('#lojaPedidoMinimo')) || 0,
@@ -1441,6 +1450,85 @@ function finSyncDataInputs() {
   if ($('#finData').value !== d) $('#finData').value = d;
   if (!$('#finLancData').value || state.finEditandoId === null) $('#finLancData').value = d;
 }
+// ---------------- Fidelidade (v1.9.17) ----------------
+function fidFone(w) {
+  const d = String(w || '').replace(/\D/g, '').replace(/^55/, '');
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return String(w || '');
+}
+function fidDataFmt(iso) {
+  if (!iso) return '—';
+  const d = new Date(String(iso).replace(' ', 'T'));
+  return isNaN(d) ? '—' : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+function fidTipoMudou() { $('#fidTextoWrap').classList.toggle('hidden', $('#fidPremioTipo').value !== 'personalizado'); }
+$('#fidPremioTipo').addEventListener('change', fidTipoMudou);
+
+async function carregarFidelidade() {
+  const r = await api('/api/painel/fidelidade');
+  const c = r.config || {};
+  $('#fidAtivo').checked = !!c.ativo;
+  $('#fidMeta').value = c.meta_compras || 5;
+  $('#fidPremioTipo').value = c.premio_tipo || 'entrega_gratis';
+  $('#fidPremioTexto').value = c.premio_texto || '';
+  fidTipoMudou();
+  const meta = c.meta_compras || 5;
+  const premios = r.premios || [];
+  $('#fidPremios').innerHTML = premios.length ? `
+    <table class="simple-table"><thead><tr><th>Cliente</th><th>Prêmio</th><th>Quando ganhou</th><th>Situação</th><th></th></tr></thead>
+    <tbody>${premios.map(p => `<tr>
+      <td><strong>${esc(p.cliente_nome || 'Cliente')}</strong><br><span class="dica">${esc(fidFone(p.whatsapp))} · ${p.marco_compras}ª compra</span></td>
+      <td>${esc(p.premio_texto || '')}</td>
+      <td>${fidDataFmt(p.criado_em)}</td>
+      <td>${p.status === 'disponivel' ? '<span class="cfg-pill on">Aguardando resgate</span>'
+        : `<span class="cfg-pill sim">Resgatado</span><br><span class="dica">${fidDataFmt(p.resgatado_em)}${p.pedido_resgate_id ? ' · pedido #' + p.pedido_resgate_id : ''}</span>`}</td>
+      <td class="acoes-cell">${p.status === 'disponivel' ? `
+        <button type="button" class="btn btn-primary btn-sm" data-fid-resgatar="${p.id}">Dar baixa (resgatou)</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-fid-remover="${p.id}">Remover</button>` : ''}</td>
+    </tr>`).join('')}</tbody></table>`
+    : '<p class="dica">Nenhum prêmio ainda. Quando um cliente completar a meta, o prêmio aparece aqui.</p>';
+  const rank = r.ranking || [];
+  $('#fidRanking').innerHTML = rank.length ? `
+    <table class="simple-table"><thead><tr><th>Cliente</th><th>Compras entregues</th><th>Faltam p/ prêmio</th></tr></thead>
+    <tbody>${rank.map(x => {
+      const resto = Number(x.compras) % meta;
+      const faltam = resto === 0 ? 0 : meta - resto;
+      return `<tr><td><strong>${esc(x.nome || 'Cliente')}</strong><br><span class="dica">${esc(fidFone(x.whatsapp))}</span></td>
+      <td>${x.compras}</td><td>${faltam === 0 ? 'Ganhou! (ver prêmios)' : faltam}</td></tr>`;
+    }).join('')}</tbody></table>`
+    : '<p class="dica">Nenhuma compra entregue ainda.</p>';
+}
+$('#formFidelidade').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await api('/api/painel/fidelidade/config', {
+    method: 'PUT',
+    body: {
+      ativo: $('#fidAtivo').checked,
+      meta_compras: Number($('#fidMeta').value),
+      premio_tipo: $('#fidPremioTipo').value,
+      premio_texto: $('#fidPremioTexto').value.trim(),
+    },
+  });
+  toast('Programa de fidelidade salvo.');
+  carregarFidelidade();
+});
+document.addEventListener('click', async (e) => {
+  const resg = e.target.closest('[data-fid-resgatar]');
+  const rem = e.target.closest('[data-fid-remover]');
+  if (resg) {
+    await api(`/api/painel/fidelidade/premios/${resg.dataset.fidResgatar}/resgatar`, { method: 'POST', body: {} });
+    toast('Prêmio marcado como resgatado.');
+    carregarFidelidade();
+  }
+  if (rem) {
+    if (!confirm('Remover este prêmio? O cliente perde o vale.')) return;
+    await api(`/api/painel/fidelidade/premios/${rem.dataset.fidRemover}`, { method: 'DELETE' });
+    toast('Prêmio removido.');
+    carregarFidelidade();
+  }
+});
+
 async function carregarFinanceiro() {
   if (!state.finData) state.finData = hojeLocal();
   finSyncDataInputs();

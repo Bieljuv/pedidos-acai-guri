@@ -66,6 +66,7 @@
       <button class="menu-item" data-view="relatorio" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chart"></use></svg> Relatório do Dia</button>
       <button class="menu-item" data-view="contabil" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-calculator"></use></svg> Contábil</button>
       <button class="menu-item" data-view="financeiro" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-wallet"></use></svg> Financeiro</button>
+      <button class="menu-item" data-view="fidelidade" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Fidelidade</button>
       <button class="menu-item" data-view="equipe" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-users"></use></svg> Equipe</button>
       <button class="menu-item" data-view="configuracoes" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-gear"></use></svg> Configurações</button>
     </nav>
@@ -300,6 +301,7 @@
             <label>WhatsApp da loja <input type="text" id="lojaWhatsapp" placeholder="5547999999999"></label>
             <label>Instagram <input type="text" id="lojaInstagram" placeholder="@acaidoguri.bc"></label>
             <label>Endereço (texto) <input type="text" id="lojaEndereco" placeholder="Rua..., bairro — cidade"></label>
+            <label>CNPJ/CPF <input type="text" id="lojaDocumento" inputmode="numeric" placeholder="Aparece no rodapé da loja e na comanda"></label>
             <label>Tempo de preparo (min) <input type="number" id="lojaTempoPreparo" min="0"></label>
             <label>Tempo de entrega (min) <input type="number" id="lojaTempoEntrega" min="0"></label>
             <label>Pedido mínimo (R$) <input type="text" id="lojaPedidoMinimo" class="money" inputmode="numeric" placeholder="0,00"></label>
@@ -464,6 +466,45 @@
       </section>
 
       <!-- CONFIGURAÇÕES -->
+      <section id="view-fidelidade" class="view hidden">
+        <h3 class="view-h">Fidelidade — quem volta, ganha</h3>
+        <p class="dica">O sistema reconhece o cliente pelo WhatsApp. A cada compra <strong>entregue</strong>, ele avança no programa; ao completar a meta, ganha o prêmio, vê o vale na tela do pedido e você é avisado no Telegram. O prêmio de entrega grátis entra sozinho no próximo pedido dele.</p>
+
+        <form class="card-form" id="formFidelidade">
+          <div class="form-row between">
+            <div><strong>Programa ativo</strong><div class="dica">Desligado = ninguém acumula nem ganha prêmio.</div></div>
+            <span class="switch"><input type="checkbox" id="fidAtivo"><span class="slider"></span></span>
+          </div>
+          <div class="grid-2">
+            <label>A cada quantas compras o cliente ganha?
+              <input type="number" id="fidMeta" min="2" max="50" step="1">
+            </label>
+            <label>Qual é o prêmio?
+              <select id="fidPremioTipo">
+                <option value="entrega_gratis">Entrega grátis no próximo pedido</option>
+                <option value="personalizado">Outro prêmio (eu escrevo)</option>
+              </select>
+            </label>
+          </div>
+          <label id="fidTextoWrap" class="hidden">Escreva o prêmio (o cliente lê exatamente isso na tela)
+            <input type="text" id="fidPremioTexto" maxlength="120" placeholder="Ex.: 1 Combo Gurizinhos grátis">
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Salvar programa</button>
+          </div>
+        </form>
+
+        <div class="bloco">
+          <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Prêmios dos clientes</h3></div>
+          <div id="fidPremios"><p class="dica">Carregando…</p></div>
+        </div>
+
+        <div class="bloco">
+          <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-heart"></use></svg> Clientes que mais voltam</h3></div>
+          <div id="fidRanking"><p class="dica">Carregando…</p></div>
+        </div>
+      </section>
+
       <section id="view-configuracoes" class="view hidden">
         <h3 class="view-h">Configurações</h3>
         <p class="dica">É aqui que você liga os avisos automáticos: o cliente recebe as confirmações no WhatsApp e você (dono) recebe os pedidos no Telegram. Sem configurar, o sistema fica em "modo simulado": registra tudo, mas não envia de verdade.</p>

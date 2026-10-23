@@ -8,10 +8,20 @@ const linha = (ch = '-') => ch.repeat(L);
 const centro = (t) => { t = String(t); const p = Math.max(0, Math.floor((L - t.length) / 2)); return ' '.repeat(p) + t; };
 const dois = (a, b) => { a = String(a); b = String(b); return a + ' '.repeat(Math.max(1, L - a.length - b.length)) + b; };
 
-function montarComanda(pedido) {
+function fmtDocumento(doc) {
+  const d = String(doc || '').replace(/\D/g, '');
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  return d;
+}
+
+function montarComanda(pedido, loja) {
   const out = [];
   out.push(linha('='));
-  out.push(centro('ACAI DO GURI'));
+  out.push(centro((loja && loja.nome) ? String(loja.nome).toUpperCase() : 'ACAI DO GURI'));
+  // v1.9.15: CNPJ/CPF da loja no cabeçalho, quando cadastrado (nome fantasia
+  // é a linha de cima; razão social não entra — decisão do Gabriel).
+  if (loja && loja.documento) out.push(centro('CNPJ/CPF: ' + fmtDocumento(loja.documento)));
   out.push(centro(`PEDIDO #${pedido.numero}`));
   // created_at é guardado em UTC — a comanda imprime no horário de Brasília.
   let data = String(pedido.created_at || '').slice(0, 16).replace('T', ' ');

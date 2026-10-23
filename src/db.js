@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS lojas (
   pedido_minimo_centavos INTEGER DEFAULT 0,
   taxa_unica_centavos INTEGER,
   chave_pix TEXT,
+  documento TEXT,
   email_pedidos TEXT,
   aberta_manual INTEGER DEFAULT 1,
   horario_abre TEXT DEFAULT '13:00',
@@ -215,6 +216,8 @@ if (MODO === 'sqlite') {
     'ALTER TABLE pedidos ADD COLUMN entrega_chamada_em TEXT',
     // v1.9.1: quem fez cada passo do pedido (trilha de autoria).
     'ALTER TABLE pedido_status_historico ADD COLUMN autor TEXT',
+    // v1.9.15: CNPJ/CPF da loja (rodapé da loja e comanda).
+    'ALTER TABLE lojas ADD COLUMN documento TEXT',
   ]) { try { sq.exec(alt); } catch { /* coluna já existe */ } }
 }
 
@@ -490,6 +493,8 @@ async function init() {
   if (!reg.rows[0] || !reg.rows[0].t) {
     throw new Error('O Postgres está sem as tabelas do sistema. Rode o arquivo supabase/schema.sql no SQL Editor do Supabase (ou no seu Postgres) e suba o app de novo.');
   }
+  // v1.9.15: garante a coluna do documento da loja em bancos PG já existentes.
+  await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS documento TEXT');
   console.log('[banco] Modo SUPABASE: conectado no Postgres da DATABASE_URL.');
   if (await seed()) console.log('[banco] Postgres vazio — seed inicial aplicado (loja de exemplo + admin/admin123).');
 }

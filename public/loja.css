@@ -332,6 +332,7 @@ body.rolou .hnome{opacity:1;transform:none}
   display:flex; align-items:center; gap:12px; text-align:left; width:100%;
   background:#fff; border:1.5px solid var(--linha); border-radius:12px;
   padding:13px 14px; min-height:52px; font-size:15px; font-weight:700;
+  color:var(--ink); /* botao nao herda a cor do tema: sem isto o rotulo some no escuro */
 }
 .pag-opcao .pag-rotulo{flex:1}
 .pag-opcao.selecionada{border-color:var(--primary); background:#FBF0FC}
@@ -546,6 +547,19 @@ body.rolou .hnome{opacity:1;transform:none}
 :root[data-tema="escuro"] .selo-esgotado{background:#3A0A40; color:#C9A9D1}
 :root[data-tema="escuro"] .card-produto,
 :root[data-tema="escuro"] .opcao{color:var(--ink)}
+/* Segunda varredura do escuro (v1.16.13 — print do Gabriel na
+   finalizacao): o rotulo das formas de pagamento somia (botao sem
+   cor herdada), o campo do cupom e o botao Aplicar ficavam BRANCOS,
+   e o botao nao-selecionado do Entrega/Retirada idem. */
+:root[data-tema="escuro"] .pag-opcao{color:var(--ink)}
+:root[data-tema="escuro"] .pag-opcao.selecionada{background:#3A0A40}
+:root[data-tema="escuro"] .segmentado button:not(.seg-ativo){background:#3A0A40; color:var(--ink); border-color:#5A2A66}
+:root[data-tema="escuro"] .cupom-row input,
+:root[data-tema="escuro"] .pdn-form input{background:#24062A; color:var(--ink)}
+:root[data-tema="escuro"] .btn-secundario{background:#3A0A40; color:var(--ink); border-color:#8E44AD}
+:root[data-tema="escuro"] input::placeholder,
+:root[data-tema="escuro"] textarea::placeholder{color:#A58BB0}
+:root[data-tema="escuro"] .sheet{scrollbar-color:#5A2A66 #24062A}
 
 /* ---------- motoboy animado (tela de acompanhamento) ---------- */
 /* Dentro da linha do tempo, sob a etapa "Saiu para entrega" (v1.16.8):

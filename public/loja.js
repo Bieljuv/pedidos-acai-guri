@@ -1024,3 +1024,24 @@ window.addEventListener('hashchange', roteador);
 $('#btn-voltar-loja').addEventListener('click', () => { location.hash = '#/'; });
 
 document.addEventListener('DOMContentLoaded', iniciar);
+
+/* Voltar ao topo (v1.9.23): surge após rolar um tanto; sobe um degrau
+   quando a barra do carrinho aparece (nunca fica escondido atrás dela). */
+(function () {
+  const btn = document.querySelector('#btn-topo');
+  if (!btn) return;
+  const barra = document.querySelector('#barra-carrinho');
+  const avaliar = () => {
+    btn.classList.toggle('visivel', window.scrollY > 500);
+    btn.classList.toggle('acima', !!(barra && !barra.hidden));
+  };
+  let tick = false;
+  window.addEventListener('scroll', () => {
+    if (!tick) { tick = true; requestAnimationFrame(() => { avaliar(); tick = false; }); }
+  }, { passive: true });
+  if (barra && window.MutationObserver) {
+    new MutationObserver(avaliar).observe(barra, { attributes: true, attributeFilter: ['hidden'] });
+  }
+  btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  avaliar();
+})();

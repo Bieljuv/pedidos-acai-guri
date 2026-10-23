@@ -207,6 +207,8 @@ if (MODO === 'sqlite') {
     'ALTER TABLE usuarios ADD COLUMN dias_semana TEXT',
     'ALTER TABLE usuarios ADD COLUMN janela_antes_min INTEGER DEFAULT 30',
     'ALTER TABLE usuarios ADD COLUMN janela_depois_min INTEGER DEFAULT 30',
+    // v1.9.22: login com senha temporária obriga a troca.
+    'ALTER TABLE usuarios ADD COLUMN precisa_trocar_senha INTEGER DEFAULT 0',
     'ALTER TABLE pedidos ADD COLUMN atualizado_por TEXT',
     // v1.9: código de entrega (PIN) + campos do módulo de entregador (99).
     'ALTER TABLE pedidos ADD COLUMN codigo_entrega TEXT',

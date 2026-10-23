@@ -42,12 +42,26 @@
     </label>
     <div id="loginErro" class="erro hidden"></div>
     <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+    <button type="button" class="btn btn-ghost btn-block" id="btnEsqueci">Esqueci minha senha</button>
+    <div id="esqueciBox" class="hidden">
+      <p class="dica">Informe seu usuário e envie: o administrador é avisado, gera uma senha temporária e te passa. Com ela você entra e cria a sua senha nova.</p>
+      <label>Seu usuário
+        <input type="text" id="esqueciLogin" autocomplete="username" placeholder="Ex.: maria">
+      </label>
+      <button type="button" class="btn btn-primary btn-block" id="btnEsqueciEnviar">Enviar pedido</button>
+      <p id="esqueciOk" class="dica hidden" style="margin-top:.5rem"></p>
+    </div>
   </form>
 </div>
 
 <!-- ============ APP ============ -->
 <div id="appView" class="app hidden">
   <aside class="sidebar">
+    <div class="side-topo">
+      <button id="btnMenuLateral" class="btn-menu-lateral" type="button" title="Fixar o menu aberto" aria-label="Fixar ou soltar o menu lateral">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
     <div class="brand">
       <img id="sideLogo" src="/uploads/seed-logo.png" alt="" onerror="this.style.display='none'">
       <div>
@@ -92,7 +106,7 @@
       <h2 id="viewTitle">Pedidos</h2>
       <div class="top-actions">
         <div id="saudeBox" class="saude" title="Estado das integrações"></div>
-        <div class="loja-ctrl">
+        <div class="loja-ctrl" data-admin>
           <label class="switch-wrap">
             <span id="lblAberta">Loja aberta</span>
             <span class="switch"><input type="checkbox" id="toggleAberta"><span class="slider"></span></span>
@@ -272,6 +286,7 @@
           <label>Token do Webhook
             <input type="password" id="asaasWebhookToken" autocomplete="off" placeholder="">
           </label>
+          <p class="campo-dica"><strong>Obrigatório:</strong> sem este token, os avisos de pagamento do Asaas são ignorados pelo sistema (proteção contra avisos falsos).</p>
           <label>URL do webhook (cole no painel do Asaas)
             <span class="copy-row">
               <input type="text" id="asaasWebhookUrl" readonly>
@@ -632,6 +647,22 @@
             </span>
           </label>
           <div id="cfgTgDetect" class="cfg-result hidden"></div>
+          <div class="vinculo-box">
+            <strong><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-key"></use></svg> Vincular com código (o jeito seguro)</strong>
+            <p class="campo-dica">As notificações e os comandos vão <strong>somente</strong> pra conversa vinculada — quem só der "start" no bot não recebe nada e nenhum comando funciona pra essa pessoa. Pra vincular (ou trocar) a conversa do dono: gere o código aqui e, no <strong>seu</strong> Telegram, envie <strong>/vincular CÓDIGO</strong> na conversa com o bot. O código vale 10 minutos, serve uma única vez e é gerado um novo a cada clique.</p>
+            <div class="form-actions">
+              <button type="button" class="btn btn-ghost" id="btnCfgTgVinculo">Gerar código de vínculo</button>
+            </div>
+            <div id="cfgTgVinculo" class="cfg-result hidden"></div>
+          </div>
+          <div class="vinculo-box">
+            <strong><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-key"></use></svg> Webhook protegido (produção)</strong>
+            <p class="campo-dica">Na loja publicada, o Telegram entrega os comandos por <strong>webhook</strong>. Registrando aqui, cada entrega vem assinada com um <strong>token secreto</strong> — POST falso sem a assinatura é recusado. <span id="cfgTgWebhookStatus"></span></p>
+            <div class="form-actions">
+              <button type="button" class="btn btn-ghost" id="btnCfgTgWebhook">Registrar webhook protegido</button>
+            </div>
+            <div id="cfgTgWebhook" class="cfg-result hidden"></div>
+          </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary">Salvar Telegram</button>
             <button type="button" class="btn btn-ghost" id="btnCfgTgTestar">Salvar e testar</button>
@@ -643,7 +674,7 @@
             <ol>
               <li>No Telegram, converse com o <strong>@BotFather</strong>, envie <strong>/newbot</strong>, escolha nome e usuário do bot — ele devolve um <strong>token</strong> (uma sequência longa). Cole o token aqui.</li>
               <li>Abra o <strong>seu bot</strong> (link que o BotFather mostra), toque em Começar e mande um "oi".</li>
-              <li>Volte aqui e clique em <strong>Detectar meu chat</strong> — o sistema descobre o número da conversa sozinho. (Se preferir, o @userinfobot também mostra seu ID.)</li>
+              <li><strong>Vincule a sua conversa:</strong> aqui no painel, clique em <strong>Gerar código de vínculo</strong> e, na conversa com o bot, envie <strong>/vincular</strong> seguido do código (ex.: /vincular 123456). É esse código que garante que as notificações vão <strong>só pra você</strong> — dar "start" no bot não dá acesso a nada. (O botão <strong>Detectar meu chat</strong> continua servindo pra conferir o número da conversa.)</li>
               <li>Salve e teste: o botão de teste <strong>envia uma mensagem de verdade</strong> pro seu Telegram. Pedido novo passa a chegar com botões que acompanham o pedido até a entrega — ao tocar em <strong>Entregue</strong>, o bot pede o <strong>código de entrega</strong> (4 dígitos que estão com o cliente) e só confirma quando você digitar o código certo.</li>
             </ol>
           </div>
@@ -719,12 +750,32 @@
             </ol>
           </div>
         </form>
+
+        <form class="card-form" id="formCfgBackup">
+          <div class="form-row">
+            <div>
+              <strong><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-box"></use></svg> Backup dos dados</strong>
+              <div class="dica">Baixe um arquivo com os dados da loja (pedidos, clientes, cardápio, financeiro). Senhas e segredos das integrações <strong>não</strong> vão no arquivo. Guarde em lugar seguro — é a sua cópia de emergência.</div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="btnBackup">Baixar backup (JSON)</button>
+          </div>
+        </form>
       </section>
 
       <!-- EQUIPE -->
       <section id="view-equipe" class="view hidden">
         <h3 class="view-h">Equipe — funcionários e ponto eletrônico</h3>
         <p class="dica">Funcionários têm login próprio, com acesso só à operação (pedidos e pausar itens do cardápio). Financeiro, relatórios e configurações continuam só do administrador — a barreira é no servidor, não só no menu.</p>
+
+        <div class="bloco" id="blocoRecuperacao">
+          <div class="bloco-head">
+            <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-key"></use></svg> Recuperação de senha</h3>
+          </div>
+          <p class="dica">Quem esquece a senha pede pela tela de login. Você gera a <strong>senha temporária</strong> aqui e passa para a pessoa — ao entrar com ela, o painel obriga a criar a senha nova.</p>
+          <div id="recuperacaoList"><p class="dica">Carregando…</p></div>
+        </div>
 
         <div class="bloco">
           <div class="bloco-head">

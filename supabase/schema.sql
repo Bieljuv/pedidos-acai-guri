@@ -49,7 +49,17 @@ CREATE TABLE IF NOT EXISTS usuarios (
   senha_hash TEXT NOT NULL, perfil TEXT DEFAULT 'admin', ativo INTEGER DEFAULT 1,
   hora_entrada TEXT, hora_saida TEXT,
   dias_semana TEXT,
-  janela_antes_min INTEGER DEFAULT 30, janela_depois_min INTEGER DEFAULT 30
+  janela_antes_min INTEGER DEFAULT 30, janela_depois_min INTEGER DEFAULT 30,
+  precisa_trocar_senha INTEGER DEFAULT 0
+);
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS precisa_trocar_senha INTEGER DEFAULT 0;
+CREATE TABLE IF NOT EXISTS recuperacao_senha (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pendente',
+  criado_em TIMESTAMPTZ DEFAULT now(),
+  atendido_em TIMESTAMPTZ,
+  atendido_por TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessoes (

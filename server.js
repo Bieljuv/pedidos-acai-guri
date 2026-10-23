@@ -9,6 +9,7 @@ const multer = require('multer');
 const db = require('./src/db');
 const { get, all, run } = db;
 const util = require('./src/util');
+const limite = require('./src/limite');
 util.carregarEnv(path.join(__dirname, '.env'));
 
 const pedidosCore = require('./src/pedidos');
@@ -17,6 +18,7 @@ const equipe = require('./src/equipe');
 const entregadores = require('./src/entregadores');
 const fidelidade = require('./src/fidelidade');
 const pushPainel = require('./src/push');
+const recuperacao = require('./src/recuperacao');
 const notif = require('./src/notificacoes');
 const pagamentos = require('./src/pagamentos');
 const comanda = require('./src/comanda');
@@ -27,12 +29,21 @@ notif.setTransicaoHandler((id, para, opts) => pedidosCore.transicionar(id, para,
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+// Cabeçalhos básicos de segurança (v1.9.28). CSP completa fica fora por
+// causa dos scripts inline das páginas públicas.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
+  next();
+});
 
 // Boot do banco: init() (confere/semeia) + preparar() (cache da config de
 // notificações). TODA rota /api aguarda essa promise — no SQLite é imediata;
 // no Postgres (Supabase) é o que garante schema conferido e seed aplicado
 // antes da primeira resposta. Se rejeitar, a API responde 500 com a causa.
-const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await fidelidade.preparar(); await pushPainel.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
+const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await fidelidade.preparar(); await pushPainel.preparar(); await recuperacao.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
 pronto.catch((e) => console.error('[banco]', e.message));
 app.use('/api', async (req, res, next) => {
   try { await pronto; next(); }
@@ -49,6 +60,17 @@ async function autenticar(req, res, next) {
   if (!token) return res.status(401).json({ erro: 'Não autenticado.' });
   const sessao = await get('SELECT * FROM sessoes WHERE token=?', token);
   if (!sessao) return res.status(401).json({ erro: 'Sessão inválida. Faça login de novo.' });
+  // Expiração (v1.9.28): sessão vale 30 dias; renovação deslizante quando
+  // falta menos da metade. Linhas antigas (sem expira_em) ganham validade.
+  const TRINTA_DIAS = 30 * 24 * 3600 * 1000;
+  const expMs = sessao.expira_em ? Date.parse(sessao.expira_em) : NaN;
+  if (!isNaN(expMs) && expMs < Date.now()) {
+    await run('DELETE FROM sessoes WHERE token=?', token);
+    return res.status(401).json({ erro: 'Sessão expirada. Faça login de novo.' });
+  }
+  if (isNaN(expMs) || expMs - Date.now() < TRINTA_DIAS / 2) {
+    await run('UPDATE sessoes SET expira_em=? WHERE token=?', new Date(Date.now() + TRINTA_DIAS).toISOString(), token);
+  }
   req.usuario = await get('SELECT id, nome, login, perfil, ativo, hora_entrada, hora_saida, dias_semana, janela_antes_min, janela_depois_min FROM usuarios WHERE id=?', sessao.usuario_id);
   if (!req.usuario) return res.status(401).json({ erro: 'Usuário não encontrado.' });
   if (Number(req.usuario.ativo) === 0) return res.status(401).json({ erro: 'Usuário desativado. Fale com o administrador.' });
@@ -68,23 +90,46 @@ function soAdmin(req, res, next) {
 
 app.post('/api/auth/login', h(async (req, res) => {
   const { login, senha } = req.body || {};
+  // Anti força-bruta (v1.9.28): 10 falhas por IP+usuário travam por 15 min.
+  const chaveLogin = limite.ipDe(req) + '|' + String(login || '').toLowerCase();
+  if (limite.bloqueado(chaveLogin, 10, 15 * 60 * 1000)) {
+    return res.status(429).json({ erro: 'Muitas tentativas de login. Aguarde alguns minutos e tente de novo.' });
+  }
   const u = await get('SELECT * FROM usuarios WHERE login=? AND ativo=1', String(login || ''));
-  if (!u || !util.verificaSenha(senha || '', u.senha_hash)) return res.status(401).json({ erro: 'Login ou senha inválidos.' });
+  if (!u || !util.verificaSenha(senha || '', u.senha_hash)) {
+    limite.falhou(chaveLogin);
+    return res.status(401).json({ erro: 'Login ou senha inválidos.' });
+  }
+  limite.limparFalhas(chaveLogin);
   // Funcionário só entra dentro da janela do turno (admin nunca é bloqueado).
   if (u.perfil === 'funcionario') {
     const janela = equipe.podeLogarAgora(u);
     if (!janela.ok) return res.status(403).json({ erro: janela.erro });
   }
   const token = util.tokenAleatorio(24);
-  await run('INSERT INTO sessoes (token, usuario_id) VALUES (?, ?)', token, u.id);
-  res.json({ token, nome: u.nome, perfil: u.perfil });
+  const expiraEm = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+  await run('INSERT INTO sessoes (token, usuario_id, expira_em) VALUES (?, ?, ?)', token, u.id, expiraEm);
+  // Avisa no painel enquanto a senha for a padrão de fábrica (admin123).
+  const senhaPadrao = u.login === 'admin' && util.verificaSenha('admin123', u.senha_hash);
+  res.json({ token, nome: u.nome, perfil: u.perfil, precisa_trocar_senha: !!u.precisa_trocar_senha, senha_padrao: senhaPadrao });
+}));
+
+// Esqueci minha senha (v1.9.22): o pedido é PÚBLICO e a resposta é sempre a
+// mesma (não confirma se o usuário existe). Quem resolve é o ADM, no painel.
+app.post('/api/public/recuperar-senha', h(async (req, res) => {
+  // Anti-spam (v1.9.28): acima de 5 pedidos/hora do mesmo IP, responde o
+  // mesmo texto mas NÃO cria nem notifica — o dono não é inundado.
+  if (limite.permitido('rec:' + limite.ipDe(req), 5, 3600 * 1000)) {
+    await recuperacao.criarPedido((req.body || {}).login);
+  }
+  res.json({ ok: true, mensagem: 'Pedido registrado! O administrador vai gerar sua nova senha e te passar.' });
 }));
 app.post('/api/auth/trocar-senha', auth, h(async (req, res) => {
   const { senha_atual, nova_senha } = req.body || {};
   const u = await get('SELECT * FROM usuarios WHERE id=?', req.usuario.id);
   if (!util.verificaSenha(senha_atual || '', u.senha_hash)) return res.status(422).json({ erro: 'Senha atual incorreta.' });
-  if (!nova_senha || String(nova_senha).length < 6) return res.status(422).json({ erro: 'A nova senha precisa de pelo menos 6 caracteres.' });
-  await run('UPDATE usuarios SET senha_hash=? WHERE id=?', util.hashSenha(nova_senha), u.id);
+  if (!nova_senha || String(nova_senha).length < 8) return res.status(422).json({ erro: 'A nova senha precisa de pelo menos 8 caracteres.' });
+  await run('UPDATE usuarios SET senha_hash=?, precisa_trocar_senha=0 WHERE id=?', util.hashSenha(nova_senha), u.id);
   res.json({ ok: true });
 }));
 
@@ -144,6 +189,10 @@ app.get('/api/public/pedidos/:token', h(async (req, res) => {
 // Fidelidade pública (checkout): o cliente digita o próprio número e o
 // sistema reconhece. Resposta mínima: contagem, meta e prêmio aguardando.
 app.get('/api/public/fidelidade/:whatsapp', h(async (req, res) => {
+  // Freio contra varredura de números (v1.9.28): 30 consultas/min por IP.
+  if (!limite.permitido('fid:' + limite.ipDe(req), 30, 60 * 1000)) {
+    return res.status(429).json({ ativo: false, erro: 'Muitas consultas. Tente de novo em um minuto.' });
+  }
   const st = await fidelidade.statusCliente(req.params.whatsapp);
   if (!st.ativo) return res.json({ ativo: false });
   res.json({
@@ -165,6 +214,13 @@ app.post('/api/webhooks/asaas', async (req, res) => {
 });
 // Telegram por webhook (produção/Vercel via setWebhook) — MESMO handler do poller local.
 app.post('/api/webhooks/telegram', async (req, res) => {
+  // Token secreto (v1.9.28): o webhook é registrado com secret_token e o
+  // Telegram o devolve neste header. Sem bater, o POST é recusado — um
+  // POST forjado não executa comando nenhum.
+  const segredo = notif.webhookSecret();
+  if (segredo && req.headers['x-telegram-bot-api-secret-token'] !== segredo) {
+    return res.status(403).json({ ok: false });
+  }
   try { await notif.tratarUpdateTelegram(req.body || {}); } catch (e) { console.error('[webhook telegram]', e.message); }
   res.status(200).json({ ok: true });
 });
@@ -382,6 +438,9 @@ const upload = multer({
 });
 app.post('/api/painel/upload', auth, soAdmin, upload.single('arquivo'), async (req, res) => {
   if (!req.file) return res.status(422).json({ erro: 'Envie uma imagem (até 5MB) no campo "arquivo".' });
+  // Assinatura real (v1.9.28): não basta o navegador DIZER que é imagem —
+  // os primeiros bytes precisam ser de uma imagem de verdade (SVG fora).
+  if (!storage.ehImagem(req.file.buffer)) return res.status(422).json({ erro: 'O arquivo não é uma imagem válida (use JPG, PNG, WEBP, GIF ou AVIF).' });
   try {
     const r = await storage.salvarArquivo(req.file.buffer, req.file.originalname, req.file.mimetype);
     res.json(r);
@@ -405,14 +464,14 @@ app.patch('/api/painel/loja', auth, soAdmin, h(async (req, res) => {
   }
   res.json(await pedidosCore.getLoja());
 }));
-app.post('/api/painel/loja/pausar', auth, h(async (req, res) => {
+app.post('/api/painel/loja/pausar', auth, soAdmin, h(async (req, res) => {
   const minutos = Math.max(1, Number((req.body || {}).minutos || 30));
   const ate = new Date(Date.now() + minutos * 60000).toISOString();
   await run('UPDATE lojas SET pausada_ate=? WHERE id=1', ate);
   eventos.emitir('loja', { acao: 'pausada', ate });
   res.json({ ok: true, pausada_ate: ate });
 }));
-app.post('/api/painel/loja/reabrir', auth, h(async (req, res) => {
+app.post('/api/painel/loja/reabrir', auth, soAdmin, h(async (req, res) => {
   await run('UPDATE lojas SET pausada_ate=NULL WHERE id=1');
   eventos.emitir('loja', { acao: 'reaberta' });
   res.json({ ok: true });
@@ -585,6 +644,20 @@ app.post('/api/painel/configuracoes/telegram/detectar-chat', auth, soAdmin, asyn
     res.json(await notif.detectarChatTelegram()); // nunca 500 por conflito/nada encontrado
   } catch (e) { res.json({ ok: false, mensagem: 'Não consegui procurar sua conversa agora. Abra o bot, mande um "oi", aguarde uns segundos e tente de novo.' }); }
 });
+app.post('/api/painel/configuracoes/telegram/registrar-webhook', auth, soAdmin, async (req, res) => {
+  try {
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
+    const base = proto + '://' + req.get('host');
+    res.json(await notif.registrarWebhook(base));
+  } catch (e) { res.status(500).json({ ok: false, erro: 'Não consegui registrar o webhook agora.' }); }
+});
+
+// Vínculo do chat do dono por código (v1.9.25): o painel gera, o dono
+// confirma enviando /vincular CODIGO na conversa com o bot.
+app.post('/api/painel/configuracoes/telegram/vinculo', auth, soAdmin, async (req, res) => {
+  try { res.json(await notif.gerarCodigoVinculo()); }
+  catch (e) { res.status(500).json({ ok: false, erro: 'Não consegui gerar o código agora.' }); }
+});
 // ---------------- Painel: Entregador 99 (v1.9.2, só admin) ----------------
 app.get('/api/painel/entregadores/config', auth, soAdmin, (req, res) => {
   res.json(entregadores.cfgPublica());
@@ -649,6 +722,21 @@ app.post('/api/painel/push/desinscrever', auth, h(async (req, res) => {
 app.post('/api/painel/push/testar', auth, h(async (req, res) => {
   const r = await pushPainel.testar(req.usuario.id);
   if (!r.ok) return res.status(422).json({ erro: r.erro || 'Falha no teste.' });
+  res.json(r);
+}));
+
+// ---------------- Painel: Recuperação de senha (v1.9.22, só admin) ---------
+app.get('/api/painel/recuperacao', auth, soAdmin, h(async (req, res) => {
+  res.json({ pedidos: await recuperacao.listar() });
+}));
+app.post('/api/painel/recuperacao/:id/gerar', auth, soAdmin, h(async (req, res) => {
+  const r = await recuperacao.gerar(Number(req.params.id), req.usuario.nome);
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
+  res.json(r);
+}));
+app.post('/api/painel/recuperacao/:id/cancelar', auth, soAdmin, h(async (req, res) => {
+  const r = await recuperacao.cancelar(Number(req.params.id));
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
   res.json(r);
 }));
 
@@ -721,6 +809,25 @@ app.get('/api/painel/stream', h(async (req, res) => {
 
 // PWA do painel (v1.9.19): manifesto gerado com o nome da loja — o painel
 // vira "app" instalável no celular do dono (sem loja de aplicativos).
+// Backup dos dados (v1.9.28): JSON com as tabelas de negócio — SEM
+// hashes de senha, tokens ou segredos de integração.
+app.get('/api/painel/backup', auth, soAdmin, h(async (req, res) => {
+  const tabelas = ['lojas', 'categorias', 'produtos', 'produto_grupos', 'grupos_opcoes', 'opcoes',
+    'bairros', 'clientes', 'pedidos', 'pedido_itens', 'pedido_item_opcoes', 'pedido_status_historico',
+    'pagamentos', 'pontos', 'entregas', 'recuperacao_senha', 'config_fidelidade', 'fidelidade_premios',
+    'sorteios', 'fin_insumos', 'fin_lancamentos'];
+  const dados = {};
+  for (const t of tabelas) {
+    try { dados[t] = await all('SELECT * FROM ' + t); } catch { dados[t] = []; }
+  }
+  try {
+    dados.usuarios = (await all('SELECT id, nome, login, perfil, ativo, hora_entrada, hora_saida, dias_semana FROM usuarios'));
+  } catch { dados.usuarios = []; }
+  const hoje = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Disposition', 'attachment; filename="backup-acai-do-guri-' + hoje + '.json"');
+  res.json({ gerado_em: new Date().toISOString(), sistema: 'pedidos-acai-guri', dados });
+}));
+
 app.get('/painel.webmanifest', h(async (req, res) => {
   const loja = await get('SELECT * FROM lojas WHERE id=1');
   const nome = (loja && loja.nome) || 'Minha Loja';
@@ -744,7 +851,12 @@ app.get('/painel.webmanifest', h(async (req, res) => {
 }));
 
 // ---------------- Estáticos ----------------
-app.use('/uploads', express.static(storage.UPLOAD_DIR));
+app.use('/uploads', express.static(storage.UPLOAD_DIR, {
+  setHeaders: (res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', 'sandbox');
+  },
+}));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/painel', (req, res) => {
   const f = path.join(__dirname, 'public', 'painel.html');

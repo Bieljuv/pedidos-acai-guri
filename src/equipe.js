@@ -214,7 +214,7 @@ async function criarFuncionario(corpo) {
   const senha = String(corpo.senha || '');
   if (!nome) throw erro422('Informe o nome do funcionário.');
   if (!login) throw erro422('Informe o login do funcionário.');
-  if (senha.length < 6) throw erro422('A senha inicial precisa de pelo menos 6 caracteres.');
+  if (senha.length < 8) throw erro422('A senha inicial precisa de pelo menos 8 caracteres.');
   validarJornada(corpo);
   if (await loginEmUso(login)) throw erro422('Este login já está em uso. Escolha outro.');
   const info = await run(
@@ -261,7 +261,7 @@ async function atualizarFuncionario(id, corpo) {
 async function redefinirSenhaFuncionario(id, novaSenha) {
   const atual = await getFuncionario(id);
   if (!atual) return null;
-  if (!novaSenha || String(novaSenha).length < 6) throw erro422('A nova senha precisa de pelo menos 6 caracteres.');
+  if (!novaSenha || String(novaSenha).length < 8) throw erro422('A nova senha precisa de pelo menos 8 caracteres.');
   await run('UPDATE usuarios SET senha_hash=? WHERE id=?', hashSenha(String(novaSenha)), Number(id));
   await run('DELETE FROM sessoes WHERE usuario_id=?', Number(id)); // derruba sessões abertas dela
   return { ok: true };

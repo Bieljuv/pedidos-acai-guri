@@ -37,8 +37,82 @@ async function preparar() {
   // Garante a linha única (id=1) e carrega o cache — chamado pelo server.js
   // no boot (promise `pronto`), antes de qualquer rota responder.
   await run('INSERT OR IGNORE INTO config_notificacoes (id, loja_id) VALUES (1, 1)');
+  // Colunas do vínculo por código (v1.9.25) — bancos antigos ganham no boot.
+  for (const sql of [
+    'ALTER TABLE config_notificacoes ADD COLUMN telegram_par_codigo TEXT',
+    'ALTER TABLE config_notificacoes ADD COLUMN telegram_par_expira TEXT',
+    'ALTER TABLE config_notificacoes ADD COLUMN telegram_par_tentativas INTEGER DEFAULT 0',
+    'ALTER TABLE config_notificacoes ADD COLUMN telegram_webhook_secret TEXT',
+    'ALTER TABLE config_notificacoes ADD COLUMN telegram_webhook_ok INTEGER DEFAULT 0',
+  ]) { try { await run(sql); } catch { /* coluna já existe */ } }
   cfgLinhaCache = await linhaCfg();
+  // Segredo do webhook (v1.9.28): gerado uma vez e guardado; o Telegram
+  // precisa devolvê-lo no header de cada POST pra ele ser aceito.
+  if (!cfgLinhaCache.telegram_webhook_secret) {
+    const segredo = require('crypto').randomBytes(24).toString('hex');
+    await run('UPDATE config_notificacoes SET telegram_webhook_secret=? WHERE id=1', segredo);
+    cfgLinhaCache = { ...cfgLinhaCache, telegram_webhook_secret: segredo };
+  }
   cfgCache = null;
+}
+function webhookSecret() {
+  return (cfgLinhaCache && cfgLinhaCache.telegram_webhook_secret) || null;
+}
+// Registra o webhook no Telegram COM o token secreto (v1.9.28): a partir
+// daí o Telegram entrega os updates neste endereço e assina cada POST.
+async function registrarWebhook(baseUrl) {
+  const c = getCfg();
+  if (!c.telegramBotToken) return { ok: false, erro: 'Cadastre primeiro o token do bot.' };
+  const segredo = webhookSecret();
+  if (!segredo) return { ok: false, erro: 'Segredo do webhook indisponível — reinicie o sistema e tente de novo.' };
+  const url = String(baseUrl || '').replace(/\/+$/, '') + '/api/webhooks/telegram';
+  if (!/^https:\/\//i.test(url)) return { ok: false, erro: 'O webhook precisa do painel publicado em HTTPS (endereço público). Abra o painel pelo endereço da loja e tente de novo.' };
+  try {
+    const resp = await fetch(`https://api.telegram.org/bot${c.telegramBotToken}/setWebhook`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({ url, secret_token: segredo, allowed_updates: ['message', 'callback_query'] }),
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (!json.ok) return { ok: false, erro: 'O Telegram recusou: ' + (json.description || ('HTTP ' + resp.status)) };
+    await run('UPDATE config_notificacoes SET telegram_webhook_ok=1 WHERE id=1');
+    cfgLinhaCache = { ...cfgLinhaCache, telegram_webhook_ok: 1 };
+    return { ok: true, mensagem: 'Webhook registrado com token secreto. Os comandos do Telegram agora passam por ele, protegidos.' };
+  } catch (e) {
+    return { ok: false, erro: 'Não consegui falar com o Telegram agora. Tente de novo em instantes.' };
+  }
+}
+
+// ---------- Vínculo do chat do dono por código (v1.9.25) ----------
+// Dar "start" no bot NÃO dá acesso a nada: notificações e comandos só
+// funcionam no chat VINCULADO. Vincular exige um código gerado no painel
+// (quem gera tem acesso de admin) — o código é a prova, não a conversa
+// mais recente. 6 dígitos, 10 minutos, uso único, queima após 5 erros.
+async function gerarCodigoVinculo() {
+  const codigo = String(require('crypto').randomInt(0, 1000000)).padStart(6, '0');
+  const expira = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await run('UPDATE config_notificacoes SET telegram_par_codigo=?, telegram_par_expira=?, telegram_par_tentativas=0 WHERE id=1', codigo, expira);
+  cfgLinhaCache = { ...cfgLinhaCache, telegram_par_codigo: codigo, telegram_par_expira: expira, telegram_par_tentativas: 0 };
+  return { ok: true, codigo };
+}
+async function tentarVinculo(chatId, codigo) {
+  const linha = await linhaCfg();
+  const salvo = linha.telegram_par_codigo ? String(linha.telegram_par_codigo) : '';
+  if (!salvo) return { ok: false, motivo: 'invalido' };
+  if (linha.telegram_par_expira && Date.now() > Date.parse(linha.telegram_par_expira)) return { ok: false, motivo: 'expirado' };
+  if (String(codigo || '') !== salvo) {
+    const tent = Number(linha.telegram_par_tentativas || 0) + 1;
+    if (tent >= 5) {
+      await run('UPDATE config_notificacoes SET telegram_par_codigo=NULL, telegram_par_expira=NULL, telegram_par_tentativas=0 WHERE id=1');
+      cfgLinhaCache = { ...cfgLinhaCache, telegram_par_codigo: null, telegram_par_expira: null, telegram_par_tentativas: 0 };
+    } else {
+      await run('UPDATE config_notificacoes SET telegram_par_tentativas=? WHERE id=1', tent);
+    }
+    return { ok: false, motivo: 'invalido' };
+  }
+  const antigo = linha.telegram_chat_id ? String(linha.telegram_chat_id) : '';
+  await run('UPDATE config_notificacoes SET telegram_chat_id=?, telegram_par_codigo=NULL, telegram_par_expira=NULL, telegram_par_tentativas=0 WHERE id=1', String(chatId));
+  await preparar(); // recarrega o cache com o chat novo
+  return { ok: true, antigo: antigo && antigo !== String(chatId) ? antigo : null };
 }
 function getCfg() {
   if (cfgCache) return cfgCache;
@@ -93,6 +167,7 @@ function cfgPublica() {
       token_configurado: !!c.telegramBotToken,
       token_mascarado: mascarar(c.telegramBotToken),
       configurado: telegramConfigurado(),
+      webhook_registrado: !!(cfgLinhaCache && cfgLinhaCache.telegram_webhook_ok),
     },
   };
 }
@@ -372,10 +447,13 @@ async function processarFila() {
 }
 
 // ---------- Mensagens padrão (v1.9: texto limpo, sem emoji) ----------
+// Escapa os caracteres de formatação do Markdown do Telegram em texto
+// que veio do cliente (v1.9.28): um nome com * ou _ não quebra a mensagem.
+const escMd = (s) => String(s ?? '').replace(/([_*`\[])/g, '\\$1');
 function msgNovoPedidoDono(pedido, itens) {
-  const linhas = itens.map(i => `• ${i.quantidade}x ${i.nome_snapshot}`).join('\n');
+  const linhas = itens.map(i => `• ${i.quantidade}x ${escMd(i.nome_snapshot)}`).join('\n');
   const codigo = pedido.codigo_entrega ? `\nCódigo de entrega: *${pedido.codigo_entrega}* (peça ao cliente na hora de entregar)` : '';
-  return `*NOVO PEDIDO #${pedido.numero}* — Açaí do Guri\n${pedido.cliente_nome} • ${pedido.tipo === 'entrega' ? 'ENTREGA' : 'RETIRADA'}\n${linhas}\nTotal: *${fmtBRL(pedido.total_centavos)}* (${pedido.forma_pagamento})${codigo}\n\nResponda *Confirmar #${pedido.numero}* ou *Cancelar #${pedido.numero}* (ou toque nos botões).`;
+  return `*NOVO PEDIDO #${pedido.numero}* — Açaí do Guri\n${escMd(pedido.cliente_nome)} • ${pedido.tipo === 'entrega' ? 'ENTREGA' : 'RETIRADA'}\n${linhas}\nTotal: *${fmtBRL(pedido.total_centavos)}* (${escMd(pedido.forma_pagamento)})${codigo}\n\nResponda *Confirmar #${pedido.numero}* ou *Cancelar #${pedido.numero}* (ou toque nos botões).`;
 }
 function msgClienteStatus(pedido, para) {
   const loja = 'Açaí do Guri';
@@ -495,7 +573,7 @@ async function tratarUpdateTelegram(upd) {
   const chatVisto = chatDeUpdate(upd);
   if (chatVisto) await registrarUltimoChat(chatVisto);
 
-  let chatId = null, acao = null, numero = null, callbackId = null, codigoInline = null;
+  let chatId = null, acao = null, numero = null, callbackId = null, codigoInline = null, codigoVinculo = null;
   if (upd.callback_query) {
     chatId = upd.callback_query.message && upd.callback_query.message.chat.id;
     callbackId = upd.callback_query.id;
@@ -520,6 +598,15 @@ async function tratarUpdateTelegram(upd) {
       const me = t.match(/^\/entregue\s+(\d+)(?:\s+(\d{4}))?\s*$/i) || t.match(/entregue\s*#(\d+)(?:\s+(?:c[oó]digo\s*)?(\d{4}))?\s*$/i);
       if (me) { acao = 'entregue'; numero = Number(me[1]); codigoInline = me[2] || null; }
     }
+    if (!acao && /^\/?recuperar(\s+a)?(\s+senha)?\s*$/i.test(t)) {
+      // Autoatendimento do ADM (v1.9.24): "/recuperar" ou "recuperar senha".
+      acao = 'recuperar';
+    }
+    if (!acao) {
+      // Vínculo por código (v1.9.25): "/vincular 123456".
+      const mv = t.match(/^\/vincular\s+(\d{6})\s*$/i);
+      if (mv) { acao = 'vincular'; codigoVinculo = mv[1]; }
+    }
     if (!acao && transicaoHandler) {
       // Resposta de 4 dígitos a um "Entregue" pendente neste chat.
       const md = t.match(/^(\d{4})$/);
@@ -531,11 +618,40 @@ async function tratarUpdateTelegram(upd) {
       }
     }
   }
+  if (acao === 'vincular' && chatId) {
+    // O vínculo roda ANTES do gate: é ele que autoriza um chat novo. A
+    // prova é o código gerado no painel — nunca a ordem das conversas.
+    const r = await tentarVinculo(chatId, codigoVinculo);
+    if (r.ok) {
+      await responderTelegram(chatId, '✅ Pronto! Esta conversa agora é a do dono — as notificações da loja chegam aqui.');
+      if (r.antigo) await responderTelegram(r.antigo, '⚠️ O bot da loja foi vinculado a outra conversa — as notificações não chegam mais aqui. Se não foi você, avise o administrador da loja.');
+    } else {
+      await responderTelegram(chatId, r.motivo === 'expirado'
+        ? 'Esse código expirou. Gere um novo no painel (Configurações → Telegram) e tente de novo.'
+        : 'Código inválido. Confira o código no painel (Configurações → Telegram) e tente de novo.');
+    }
+    return;
+  }
   if (!chatId || !chatAutorizado(chatId)) return; // ignora qualquer outro chat silenciosamente
   if (callbackId) {
     fetch(`https://api.telegram.org/bot${getCfg().telegramBotToken}/answerCallbackQuery`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: callbackId }),
     }).catch(() => {});
+  }
+  if (acao === 'recuperar') {
+    // Só o chat do dono chega até aqui (o gate acima já filtrou). A
+    // temporária vai SÓ nesta conversa — nunca por outro canal.
+    try {
+      const recuperacao = require('./recuperacao'); // lazy: evita ciclo de require
+      const r = await recuperacao.recuperarAdmin();
+      await responderTelegram(chatId, r.ok
+        ? `🔑 Nova senha temporária do painel (usuário ${r.login}):\n\n${r.temporaria}\n\nEntre no painel com ela — você cria a sua senha nova na hora. (As sessões abertas do painel foram encerradas.)`
+        : `Não consegui recuperar: ${r.erro}`);
+    } catch (e) {
+      console.error('[telegram] recuperar:', e.message);
+      await responderTelegram(chatId, 'Não consegui recuperar sua senha agora. Tente de novo em instantes.');
+    }
+    return;
   }
   if (!acao || !numero || !transicaoHandler) return;
   const pedido = await get('SELECT * FROM pedidos WHERE loja_id=1 AND numero=?', numero);
@@ -566,5 +682,6 @@ module.exports = {
   enfileirar, processarFila, notificarNovoPedido, notificarTransicao, notificarDonoTexto,
   setTransicaoHandler, iniciar, evolutionConfigurado, telegramConfigurado, tratarUpdateTelegram,
   getCfg, invalidarCfg, cfgPublica, salvarCfg, testarWhatsapp, testarTelegram, detectarChatTelegram,
+  gerarCodigoVinculo, tentarVinculo, webhookSecret, registrarWebhook, escMd,
   iniciarPollerTelegram, preparar,
 };

@@ -525,3 +525,11 @@ img{max-width:100%}
 .fidel-dot.on{background:#ffd968;border-color:#ffd968}
 .ck-fidelidade{background:#f3e8f7;border:1px solid #d9b8ec;color:#4a1066;border-radius:10px;padding:10px 12px;font-size:.9rem;line-height:1.45;margin:2px 0 6px}
 :root[data-tema="escuro"] .ck-fidelidade{background:#2c1540;border-color:#7A4A86;color:#F2C1F7}
+
+/* Voltar ao topo (v1.9.23) — aparece só depois de rolar; sobe quando a
+   barra do carrinho está visível, pra nunca ficar embaixo dela. */
+.btn-topo{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:36;width:46px;height:46px;border-radius:50%;border:1px solid var(--linha);background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 22px rgba(60,1,81,.25);cursor:pointer;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .25s ease,transform .25s ease,bottom .25s ease}
+.btn-topo .ic{width:22px;height:22px;transform:rotate(-90deg)}
+.btn-topo.visivel{opacity:1;transform:none;pointer-events:auto}
+.btn-topo.acima{bottom:calc(84px + env(safe-area-inset-bottom))}
+:root[data-tema="escuro"] .btn-topo{background:#2c1540;color:#F2C1F7;border-color:#7A4A86}

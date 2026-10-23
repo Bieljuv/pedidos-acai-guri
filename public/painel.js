@@ -136,7 +136,11 @@ function openModal(titulo, html) {
   $$('.money', $('#modalBody')).forEach(wireMoney);
   return $('#modalBody');
 }
-function closeModal() { $('#modal').classList.add('hidden'); $('#modalOverlay').classList.add('hidden'); }
+let modalTravado = false; // troca de senha obrigatória (temporária) não fecha
+function closeModal() {
+  if (modalTravado) return;
+  $('#modal').classList.add('hidden'); $('#modalOverlay').classList.add('hidden');
+}
 $('#modalFechar').addEventListener('click', closeModal);
 $('#modalOverlay').addEventListener('click', closeModal);
 
@@ -147,10 +151,11 @@ $('#loginForm').addEventListener('submit', async (e) => {
   try {
     const data = await api('/api/auth/login', { method: 'POST', body: { login: $('#loginUser').value.trim(), senha: $('#loginPass').value } });
     state.token = data.token;
-    state.user = { nome: data.nome, perfil: data.perfil };
+    state.user = { nome: data.nome, perfil: data.perfil, precisa_trocar_senha: !!data.precisa_trocar_senha };
     localStorage.setItem('painel_token', state.token);
     localStorage.setItem('painel_user', JSON.stringify(state.user));
     iniciarApp();
+    if (data.senha_padrao) setTimeout(() => toast('Você ainda usa a senha padrão (admin123). Troque em "Trocar senha" — hoje ela é a maior brecha do sistema.', true), 700);
   } catch (err) {
     erro.textContent = err.message || 'Usuário ou senha inválidos.';
     erro.classList.remove('hidden');
@@ -187,6 +192,59 @@ $('#btnTrocarSenha').addEventListener('click', () => {
   });
 });
 
+/* ---------- Esqueci minha senha (v1.9.22) ---------- */
+$('#btnEsqueci').addEventListener('click', () => {
+  $('#esqueciBox').classList.toggle('hidden');
+  const atual = $('#esqueciLogin').value.trim();
+  if (!atual && $('#loginUser').value.trim()) $('#esqueciLogin').value = $('#loginUser').value.trim();
+});
+$('#btnEsqueciEnviar').addEventListener('click', async () => {
+  const login = $('#esqueciLogin').value.trim();
+  const ok = $('#esqueciOk');
+  if (!login) { ok.textContent = 'Digite seu usuário para enviar o pedido.'; ok.classList.remove('hidden'); return; }
+  try {
+    const r = await api('/api/public/recuperar-senha', { method: 'POST', body: { login } });
+    ok.textContent = (r && r.mensagem) || 'Pedido registrado! O administrador vai gerar sua nova senha e te passar.';
+    ok.classList.remove('hidden');
+    $('#btnEsqueciEnviar').disabled = true;
+  } catch (e) {
+    ok.textContent = 'Não consegui enviar agora. Avise o administrador direto, por favor.';
+    ok.classList.remove('hidden');
+  }
+});
+
+// Troca OBRIGATÓRIA ao entrar com a senha temporária: o modal não fecha
+// até a pessoa criar a senha dela (o servidor também limpa a marca aqui).
+function abrirTrocaSenhaForcada() {
+  modalTravado = true;
+  $('#modalFechar').classList.add('hidden');
+  const body = openModal('Crie sua nova senha', `
+    <p class="dica">Você entrou com uma <strong>senha temporária</strong>. Para continuar, crie a sua senha nova agora — a temporária para de valer assim que você salvar.</p>
+    <form id="formSenhaForcada">
+      <label>Senha temporária (a que você acabou de usar) <input type="password" id="senhaAtualF" autocomplete="current-password" required></label>
+      <label>Nova senha <input type="password" id="senhaNovaF" autocomplete="new-password" minlength="6" required></label>
+      <label>Repetir nova senha <input type="password" id="senhaNova2F" autocomplete="new-password" minlength="6" required></label>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">Salvar e entrar</button></div>
+    </form>`);
+  const atualF = $('#senhaAtualF', body);
+  if (atualF && $('#loginPass').value) atualF.value = $('#loginPass').value;
+  $('#formSenhaForcada', body).addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if ($('#senhaNovaF', body).value !== $('#senhaNova2F', body).value) { toast('As senhas novas não conferem.', true); return; }
+    try {
+      await api('/api/auth/trocar-senha', { method: 'POST', body: { senha_atual: $('#senhaAtualF', body).value, nova_senha: $('#senhaNovaF', body).value } });
+      if (state.user) {
+        state.user.precisa_trocar_senha = false;
+        localStorage.setItem('painel_user', JSON.stringify(state.user));
+      }
+      modalTravado = false;
+      $('#modalFechar').classList.remove('hidden');
+      closeModal();
+      toast('Senha nova criada. Bem-vindo(a)!');
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
 /* ---------- Navegação ---------- */
 const TITULOS = {
   pedidos: 'Pedidos', cardapio: 'Cardápio', grupos: 'Grupos e Opções', bairros: 'Bairros e Taxas',
@@ -212,7 +270,7 @@ function irPara(view) {
   if (view === 'financeiro') carregarFinanceiro();
   if (view === 'fidelidade') carregarFidelidade();
   if (view === 'configuracoes') carregarConfiguracoes();
-  if (view === 'equipe') { carregarEquipe(); carregarPontoRelatorio(); }
+  if (view === 'equipe') { carregarEquipe(); carregarPontoRelatorio(); carregarRecuperacao(); }
 }
 $$('.menu-item[data-view]').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.view.startsWith('rec-')) { $('#accReceb').classList.add('open'); $('#accRecebBtn').setAttribute('aria-expanded', 'true'); }
@@ -2009,6 +2067,8 @@ function preencherConfiguracoes(c) {
     ? `Token salvo (${t.token_mascarado || '••••'}). Deixe o campo em branco para manter o atual — preencha só se for trocar.`
     : 'O token é a sequência longa que o @BotFather devolve quando o bot é criado. Ele fica guardado só no servidor.';
   $('#cfgTgChatId').value = t.chat_id || '';
+  const wst = $('#cfgTgWebhookStatus');
+  if (wst) wst.textContent = t.webhook_registrado ? 'Status: webhook REGISTRADO e protegido.' : 'Status: webhook ainda não registrado.';
   $$('[data-mostrar]').forEach(b => { b.innerHTML = ic('olho') + ' Mostrar'; b.dataset.mostrarEstado = 'oculto'; });
 }
 async function carregarConfiguracoes() {
@@ -2193,6 +2253,51 @@ $('#btnCfgTgDetectar').addEventListener('click', async () => {
   } catch (err) { cfgResultado(info, false, err.message); }
   btn.disabled = false;
 });
+$('#btnCfgTgVinculo').addEventListener('click', async () => {
+  const btn = $('#btnCfgTgVinculo');
+  const box = $('#cfgTgVinculo');
+  btn.disabled = true;
+  try {
+    const data = await api('/api/painel/configuracoes/telegram/vinculo', { method: 'POST', body: {} });
+    box.classList.remove('hidden');
+    if (data && data.ok && data.codigo) {
+      cfgResultado(box, true, 'Seu código é ' + data.codigo + ' — abra o bot no SEU Telegram e envie: /vincular ' + data.codigo + ' (vale 10 minutos, uma única vez). Quando o bot responder confirmando, esta conversa vira a do dono.');
+    } else {
+      cfgResultado(box, false, (data && data.erro) || 'Não consegui gerar o código.');
+    }
+  } catch (err) { box.classList.remove('hidden'); cfgResultado(box, false, err.message); }
+  btn.disabled = false;
+});
+$('#btnCfgTgWebhook').addEventListener('click', async () => {
+  const btn = $('#btnCfgTgWebhook');
+  const box = $('#cfgTgWebhook');
+  btn.disabled = true;
+  try {
+    const data = await api('/api/painel/configuracoes/telegram/registrar-webhook', { method: 'POST', body: {} });
+    box.classList.remove('hidden');
+    cfgResultado(box, !!(data && data.ok), (data && (data.mensagem || data.erro)) || 'Sem resposta do servidor.');
+    if (data && data.ok) { const wst = $('#cfgTgWebhookStatus'); if (wst) wst.textContent = 'Status: webhook REGISTRADO e protegido.'; }
+  } catch (err) { box.classList.remove('hidden'); cfgResultado(box, false, err.message); }
+  btn.disabled = false;
+});
+$('#btnBackup').addEventListener('click', async () => {
+  const btn = $('#btnBackup');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/painel/backup', { headers: { Authorization: 'Bearer ' + state.token } });
+    if (!resp.ok) throw new Error('Não consegui gerar o backup agora.');
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'backup-acai-do-guri.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('Backup baixado. Guarde o arquivo em lugar seguro.');
+  } catch (err) { toast(err.message, true); }
+  btn.disabled = false;
+});
 $('#btnCfgTgTestar').addEventListener('click', async () => {
   const res = $('#cfgTgResult');
   res.className = 'cfg-result';
@@ -2303,6 +2408,55 @@ function diasTexto(diasSemana) {
   const arr = String(diasSemana || '').split(',').filter(s => s !== '').map(Number);
   return arr.length ? arr.map(n => DIA_CURTO[n]).filter(Boolean).join(' ') : 'todos os dias';
 }
+// ---------------- Recuperação de senha (v1.9.22, admin) ----------------
+async function carregarRecuperacao() {
+  const el = $('#recuperacaoList');
+  if (!el) return;
+  try {
+    const r = await api('/api/painel/recuperacao');
+    const lista = r.pedidos || [];
+    const pendentes = lista.filter(p => p.status === 'pendente');
+    const resolvidos = lista.filter(p => p.status !== 'pendente').slice(0, 5);
+    el.innerHTML = `
+      ${pendentes.length ? `<table class="simple-table"><thead><tr><th>Quem pediu</th><th>Quando</th><th></th></tr></thead>
+        <tbody>${pendentes.map(p => `<tr>
+          <td><strong>${esc(p.nome)}</strong><br><span class="dica">usuário ${esc(p.login)}</span></td>
+          <td>${fidDataFmt(p.criado_em)}</td>
+          <td class="acoes-cell">
+            <button type="button" class="btn btn-primary btn-sm" data-rec-gerar="${p.id}">Gerar senha temporária</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-rec-cancelar="${p.id}">Ignorar</button>
+          </td></tr>`).join('')}</tbody></table>`
+        : '<p class="dica">Nenhum pedido esperando. Quando alguém pedir, aparece aqui (e você é avisado no Telegram e no push).</p>'}
+      ${resolvidos.length ? `<p class="dica" style="margin-top:.6rem">${resolvidos.map(p =>
+        `${esc(p.nome)} — ${p.status === 'atendida' ? `atendido por ${esc(p.atendido_por || 'ADM')} em ${fidDataFmt(p.atendido_em)}` : p.status}`).join('<br>')}</p>` : ''}`;
+  } catch { el.innerHTML = '<p class="dica">Não consegui carregar os pedidos agora.</p>'; }
+}
+document.addEventListener('click', async (e) => {
+  const gerar = e.target.closest('[data-rec-gerar]');
+  const cancelar = e.target.closest('[data-rec-cancelar]');
+  if (gerar) {
+    const r = await api(`/api/painel/recuperacao/${gerar.dataset.recGerar}/gerar`, { method: 'POST', body: {} }).catch((err) => ({ erro: err.message }));
+    if (!r || r.erro) { toast((r && r.erro) || 'Não consegui gerar.', true); return; }
+    const body = openModal('Senha temporária de ' + r.nome, `
+      <p class="dica">Passe esta senha para <strong>${esc(r.nome)}</strong> (usuário <strong>${esc(r.login)}</strong>). É com ela que a pessoa entra — e o painel vai obrigar a criar a senha nova na hora. Ela não aparece de novo aqui.</p>
+      <div class="qr-texto" style="font-size:1.3rem;text-align:center;letter-spacing:.06em" id="recTempTxt">${esc(r.temporaria)}</div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="recTempCopiar">Copiar senha</button>
+        <button type="button" class="btn btn-ghost" id="recTempOk">Já passei, fechar</button>
+      </div>`);
+    $('#recTempCopiar', body).addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(r.temporaria); toast('Senha copiada!'); }
+      catch { toast('Selecione a senha e copie manualmente.'); }
+    });
+    $('#recTempOk', body).addEventListener('click', closeModal);
+    carregarRecuperacao();
+  }
+  if (cancelar) {
+    await api(`/api/painel/recuperacao/${cancelar.dataset.recCancelar}/cancelar`, { method: 'POST', body: {} }).catch(() => {});
+    carregarRecuperacao();
+  }
+});
+
 async function carregarEquipe() {
   try {
     state.equipe = await api('/api/painel/equipe');
@@ -2357,7 +2511,7 @@ function modalFuncionario(f) {
         <label>Nome <input type="text" id="eqNome" value="${esc(f.nome)}" required></label>
         <label>Login <input type="text" id="eqLogin" value="${esc(f.login)}" autocomplete="off" required></label>
       </div>
-      ${edit ? '' : '<label>Senha inicial <input type="text" id="eqSenha" minlength="6" autocomplete="off" required placeholder="Mínimo 6 caracteres"></label>'}
+      ${edit ? '' : '<label>Senha inicial <input type="text" id="eqSenha" minlength="8" autocomplete="off" required placeholder="Mínimo 8 caracteres"></label>'}
       <div class="grid-2">
         <label>Hora de entrada <input type="time" id="eqEntrada" value="${esc(f.hora_entrada || '')}"></label>
         <label>Hora de saída <input type="time" id="eqSaida" value="${esc(f.hora_saida || '')}"></label>
@@ -2396,7 +2550,7 @@ function modalSenhaFuncionario(f) {
   if (!f) return;
   const body = openModal('Redefinir senha — ' + f.nome, `
     <form id="formSenhaFunc">
-      <label>Nova senha <input type="text" id="eqNovaSenha" minlength="6" autocomplete="off" required placeholder="Mínimo 6 caracteres"></label>
+      <label>Nova senha <input type="text" id="eqNovaSenha" minlength="8" autocomplete="off" required placeholder="Mínimo 8 caracteres"></label>
       <p class="dica">Ao redefinir, as sessões abertas deste funcionário são encerradas.</p>
       <div class="form-actions"><button class="btn btn-primary" type="submit">Redefinir senha</button></div>
     </form>`);
@@ -2491,6 +2645,7 @@ function iniciarApp() {
   $('#loginView').classList.add('hidden');
   $('#appView').classList.remove('hidden');
   estadoBotaoPush();
+  if (state.user && state.user.precisa_trocar_senha) abrirTrocaSenhaForcada();
   const ehAdmin = !state.user || state.user.perfil === 'admin';
   if (state.user) {
     $('#userNome').textContent = state.user.nome || 'Admin';
@@ -2508,3 +2663,16 @@ if (state.token) {
   // valida a sessão carregando a loja; se 401, o api() desloga sozinho
   iniciarApp();
 }
+
+/* Menu lateral retrátil (v1.9.26): o hambúrguer fixa/solta o menu aberto. */
+(function () {
+  const btn = document.getElementById('btnMenuLateral');
+  if (!btn) return;
+  if (localStorage.getItem('guri-menu-fixado') === '1') document.body.classList.add('menu-fixado');
+  btn.addEventListener('click', () => {
+    const fixo = document.body.classList.toggle('menu-fixado');
+    localStorage.setItem('guri-menu-fixado', fixo ? '1' : '0');
+    btn.title = fixo ? 'Soltar o menu (recolhe sozinho)' : 'Fixar o menu aberto';
+  });
+  if (document.body.classList.contains('menu-fixado')) btn.title = 'Soltar o menu (recolhe sozinho)';
+})();

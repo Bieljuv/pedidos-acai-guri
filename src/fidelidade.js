@@ -214,7 +214,7 @@ async function aoTransicionar(pedido, para) {
       VALUES (1, ?, ?, ?, ?, ?, ?)`, whats, pedido.cliente_nome || null, total, cfg.premio_tipo, texto, pedido.id);
     try {
       await notif.notificarDonoTexto(
-        `🎉 *Fidelidade:* ${pedido.cliente_nome || 'Cliente'} completou ${total} compras e ganhou um prêmio: ${texto}!\n` +
+        `🎉 *Fidelidade:* ${notif.escMd(pedido.cliente_nome || 'Cliente')} completou ${total} compras e ganhou um prêmio: ${notif.escMd(texto)}!\n` +
         `O prêmio já está valendo para o próximo pedido${cfg.premio_tipo === 'entrega_gratis' ? ' (a entrega sai grátis sozinha)' : ''}.`);
     } catch { /* Telegram é bônus; o prêmio já está salvo */ }
   } catch (e) { console.error('[fidelidade] aoTransicionar:', e.message); }
@@ -304,7 +304,7 @@ async function sortear({ titulo, premio_texto, ini, fim }) {
   try { await concederPremioAvulso(ganhador.whatsapp, ganhador.nome, `${tit}: ${premio}`); } catch { /* vale é bônus */ }
   try {
     await notif.notificarDonoTexto(
-      `🎲 *Sorteio realizado:* ${tit}\nPrêmio: ${premio}\nGanhador(a): ${ganhador.nome || 'Cliente'} (${ganhador.whatsapp}) — ${ganhador.compras} compra(s) no período, de ${parts.length} participante(s).\nO vale já foi criado no nome dele(a). É só chamar no WhatsApp e comemorar!`);
+      `🎲 *Sorteio realizado:* ${notif.escMd(tit)}\nPrêmio: ${notif.escMd(premio)}\nGanhador(a): ${notif.escMd(ganhador.nome || 'Cliente')} (${ganhador.whatsapp}) — ${ganhador.compras} compra(s) no período, de ${parts.length} participante(s).\nO vale já foi criado no nome dele(a). É só chamar no WhatsApp e comemorar!`);
   } catch { /* idem */ }
   return {
     ok: true, sorteio_id: sorteioId,

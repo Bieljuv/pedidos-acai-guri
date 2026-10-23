@@ -484,3 +484,46 @@ tr.ponto-aberto td{background:#fdf3d8}
 @keyframes sorPulse{0%{transform:scale(.92)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
 :root[data-tema="escuro"] .sor-nome{color:#F2C1F7}
 :root[data-tema="escuro"] .sor-tit{color:#d9a7e8}
+
+/* Vínculo do Telegram por código (v1.9.25) */
+.vinculo-box{margin-top:1rem;border-top:1px dashed var(--linha);padding-top:1rem}
+.vinculo-box .form-actions{margin-top:.6rem}
+
+/* ===== Menu lateral retrátil (v1.9.26, só computador) =====
+   Fechado = trilho de ícones (72px); passar o mouse expande pra 268px;
+   o botão hambúrguer FIXA aberto (lembra a escolha). Por dentro, os
+   blocos mantêm 268px e a barra recorta — nada reflui, só revela. */
+.side-topo{display:none}
+@media (min-width:861px){
+  .sidebar{overflow:hidden;clip-path:inset(0);transition:width .28s ease}
+  .sidebar .brand,.sidebar .menu,.sidebar .side-footer{width:268px;flex:none}
+  .side-topo{display:block;width:268px;flex:none;padding:.75rem .7rem 0}
+  .btn-menu-lateral{display:flex;flex-direction:column;justify-content:center;gap:5px;width:42px;height:42px;padding:0 .8rem;background:transparent;border:0;border-radius:10px;cursor:pointer}
+  .btn-menu-lateral span{display:block;width:18px;height:2px;border-radius:2px;background:#f3e4f8}
+  .btn-menu-lateral:hover{background:rgba(255,255,255,.1)}
+  body.menu-fixado .btn-menu-lateral{background:var(--primary)}
+  body:not(.menu-fixado) .sidebar{width:72px}
+  body:not(.menu-fixado) .sidebar:hover{width:268px;box-shadow:14px 0 34px rgba(34,0,46,.35)}
+  /* recolhido: logo vira só a marca, nome some, rodapé vira ícones */
+  .sidebar .brand img{transition:width .28s ease}
+  body:not(.menu-fixado) .sidebar:not(:hover) .brand img{width:44px}
+  body:not(.menu-fixado) .sidebar:not(:hover) .brand>div{opacity:0}
+  .sidebar .brand>div{transition:opacity .18s ease}
+  body:not(.menu-fixado) .sidebar:not(:hover) .side-footer .btn{border-color:transparent;background:transparent}
+  .side-footer .btn{justify-content:flex-start;padding-left:.7rem}
+  .side-user{padding-left:.7rem}
+  .menu-item{position:relative}
+  body:not(.menu-fixado) .sidebar:not(:hover) .badge-count{position:absolute;top:4px;right:auto;left:34px;margin:0;padding:.02rem .38rem}
+}
+
+/* Recolhido = SÓ ícones (v1.9.27): os rótulos somem de verdade (fonte 0),
+   não ficam cortados no trilho; o selo mantém o tamanho próprio. */
+@media (min-width:861px){
+  body:not(.menu-fixado) .sidebar:not(:hover) .menu-item,
+  body:not(.menu-fixado) .sidebar:not(:hover) .side-user,
+  body:not(.menu-fixado) .sidebar:not(:hover) .side-footer .btn{font-size:0}
+  body:not(.menu-fixado) .sidebar:not(:hover) .submenu{display:none}
+}
+@media (min-width:861px){
+  body:not(.menu-fixado) .sidebar:not(:hover) .side-user span{font-size:0}
+}

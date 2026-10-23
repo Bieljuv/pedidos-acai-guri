@@ -205,7 +205,10 @@ async function webhookMercadoPago(corpo) {
 async function webhookAsaas(corpo, headers) {
   const cfg = await getConfig('asaas');
   const tokenEsperado = cfg && cfg.credenciais.webhook_token;
-  if (tokenEsperado && headers['asaas-access-token'] !== tokenEsperado) return { processado: false, erro: 'token inválido' };
+  // Fail-closed (v1.9.28): sem o token cadastrado no painel, o aviso é
+  // ignorado — aceitar POST de qualquer um marcaria pedido como pago.
+  if (!tokenEsperado) { console.warn('[webhook asaas] webhook_token não configurado no painel — aviso ignorado.'); return { processado: false, erro: 'webhook_token não configurado' }; }
+  if (headers['asaas-access-token'] !== tokenEsperado) return { processado: false, erro: 'token inválido' };
   const evento = corpo && corpo.event;
   const pay = (corpo && corpo.payment) || {};
   const pag = await get('SELECT * FROM pagamentos WHERE provedor=? AND (externo_id=? OR pedido_id=?)',

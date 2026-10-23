@@ -80,6 +80,18 @@ body.rolou .hnome{opacity:1;transform:none}
   width:min(300px,74vw);
   filter:drop-shadow(0 14px 26px rgba(0,0,0,.45));
 }
+/* Foto de capa (v1.13.6): FUNDO COMPLETO do hero — entra no lugar da cor de
+   fundo, preenchendo toda a area; uma camada escura por cima garante a
+   leitura da logo e dos textos. Sem capa, o hero fica como sempre. */
+.hero{ position:relative; overflow:hidden; }
+.hero-capa{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0;
+}
+.hero.com-capa::after{
+  content:''; position:absolute; inset:0; z-index:1;
+  background:linear-gradient(180deg, rgba(5,0,10,.42), rgba(5,0,10,.68));
+}
+.hero > *:not(.hero-capa){ position:relative; z-index:2; }
 .hero h1{font-size:30px;font-weight:900;margin-top:16px;letter-spacing:.2px}
 .hero-status{margin-top:8px;font-size:15px;font-weight:700}
 .hero-status.aberta{color:#7CF29C}

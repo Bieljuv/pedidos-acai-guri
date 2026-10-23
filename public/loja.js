@@ -209,12 +209,42 @@ async function iniciar() {
   roteador();
 }
 
+// Icone da aba do navegador (v1.13.5): a logo da loja desenhada sobre um
+// quadrado da COR dela. Logo branca/transparente some na abinha do navegador;
+// com o fundo da marca, aparece. Se algo falhar, usa a logo pura.
+function faviconDaLoja(url, cor) {
+  if (!url) return;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const x = c.getContext('2d');
+      const fundo = (p) => { x.beginPath(); if (x.roundRect) x.roundRect(0, 0, 64, 64, 14); else x.rect(0, 0, 64, 64); };
+      x.fillStyle = cor || '#7E047D'; fundo(); x.fill();
+      x.save(); fundo(); x.clip();
+      const esc = Math.max(56 / img.width, 56 / img.height);
+      const w = img.width * esc, h = img.height * esc;
+      x.drawImage(img, 4 + (56 - w) / 2, 4 + (56 - h) / 2, w, h);
+      x.restore();
+      let link = document.querySelector('link[rel="icon"]');
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.type = 'image/png'; link.href = c.toDataURL('image/png');
+    } catch { const link = document.querySelector('link[rel="icon"]'); if (link) link.href = url; }
+  };
+  img.src = url;
+}
+
 function renderLoja() {
   document.title = `${loja.nome} — Peça online`;
   $('#hdr-nome').textContent = loja.nome;
   $('#hero-nome').textContent = loja.nome;
   if (loja.logo_url) {
     const gl = $('#hero-logo'); gl.src = loja.logo_url; gl.hidden = false;
+  const capa = $('#hero-capa');
+  if (loja.capa_url) { capa.src = loja.capa_url; capa.hidden = false; document.querySelector('.hero').classList.add('com-capa'); }
+  else { capa.hidden = true; document.querySelector('.hero').classList.remove('com-capa'); }
+  faviconDaLoja(loja.logo_url, loja.cor_primaria);
   }
   const aberta = !!loja.aberta && !loja.pausada;
   const hs = $('#hdr-status');

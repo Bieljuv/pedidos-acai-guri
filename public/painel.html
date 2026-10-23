@@ -11,7 +11,7 @@
 <script src="/icons.js"></script>
 <link rel="stylesheet" href="/painel.css">
 <link rel="stylesheet" href="/tema.css" id="temaCss">
-<link rel="icon" href="/uploads/seed-logo.png">
+<link rel="icon" href="/img/logo-padrao.png">
 <link rel="manifest" href="/painel.webmanifest">
 <meta name="theme-color" content="#3C0151">
 <meta name="mobile-web-app-capable" content="yes">
@@ -318,13 +318,19 @@
             <div class="upload-box">
               <span class="upload-titulo">Logo da loja</span>
               <img id="logoPreview" class="upload-preview logo" alt="">
-              <label class="btn btn-ghost btn-sm upload-btn">Enviar logo<input type="file" id="fileLogo" accept="image/*" hidden></label>
+              <div class="upload-acoes">
+                <label class="btn btn-ghost btn-sm upload-btn">Enviar logo<input type="file" id="fileLogo" accept="image/*" hidden></label>
+                <button type="button" class="btn btn-ghost btn-sm upload-btn" id="btnExcluirLogo">Excluir</button>
+              </div>
               <input type="hidden" id="lojaLogoUrl">
             </div>
             <div class="upload-box">
               <span class="upload-titulo">Foto de capa</span>
               <img id="capaPreview" class="upload-preview capa" alt="">
-              <label class="btn btn-ghost btn-sm upload-btn">Enviar capa<input type="file" id="fileCapa" accept="image/*" hidden></label>
+              <div class="upload-acoes">
+                <label class="btn btn-ghost btn-sm upload-btn">Enviar capa<input type="file" id="fileCapa" accept="image/*" hidden></label>
+                <button type="button" class="btn btn-ghost btn-sm upload-btn" id="btnExcluirCapa">Excluir</button>
+              </div>
               <input type="hidden" id="lojaCapaUrl">
             </div>
           </div>

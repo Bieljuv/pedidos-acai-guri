@@ -53,13 +53,14 @@ h3.view-h{margin-bottom:.4rem}
 /* ---------- layout ---------- */
 .app{display:flex;min-height:100vh}
 .sidebar{width:268px;flex:none;background:linear-gradient(180deg,var(--deep),var(--night));color:#fff;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
-.brand{display:flex;flex-direction:column;gap:.55rem;align-items:flex-start;padding:1rem .9rem;border-bottom:1px solid rgba(255,255,255,.14)}
-.brand img{width:178px;max-width:100%;height:auto;border-radius:14px;object-fit:contain}
+.brand{display:flex;flex-direction:column;gap:.3rem;align-items:flex-start;padding:.55rem .9rem;border-bottom:1px solid rgba(255,255,255,.14)}
+.brand img{width:86px;max-width:100%;height:auto;border-radius:12px;object-fit:contain}
 .brand-nome{font-weight:800;font-size:1rem;line-height:1.1}
 .brand-sub{font-size:.75rem;opacity:.75}
-.menu{padding:1rem .7rem;display:flex;flex-direction:column;gap:5px;overflow-y:auto;flex:1 1 auto;min-height:0;scrollbar-width:none}
-.menu::-webkit-scrollbar{display:none}
-.menu-item{background:transparent;border:none;color:#f3e4f8;text-align:left;padding:.78rem .8rem;border-radius:10px;font-size:.95rem;font-weight:600;display:flex;align-items:center;gap:.6rem;width:100%}
+.menu{padding:.8rem .7rem;display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1 1 auto;min-height:0;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.35) transparent}
+.menu::-webkit-scrollbar{width:6px}
+.menu::-webkit-scrollbar-thumb{background:rgba(255,255,255,.35);border-radius:3px}
+.menu-item{background:transparent;border:none;color:#f3e4f8;text-align:left;padding:.55rem .8rem;border-radius:10px;font-size:.92rem;font-weight:600;display:flex;align-items:center;gap:.6rem;width:100%}
 .menu-item:hover{background:rgba(255,255,255,.1)}
 .menu-item.active{background:var(--primary);color:#fff}
 .menu-sub{padding-left:1.7rem;font-size:.88rem;font-weight:500}
@@ -68,9 +69,9 @@ h3.view-h{margin-bottom:.4rem}
 .acc-arrow{margin-left:auto;transition:.2s}
 .menu-acc[aria-expanded="true"] .acc-arrow{transform:rotate(90deg)}
 .badge-count{background:var(--accent);color:#fff;border-radius:999px;font-size:.72rem;padding:.05rem .45rem;margin-left:auto;font-weight:800}
-.side-footer{margin-top:auto;padding:.8rem;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-direction:column;gap:.4rem}
+.side-footer{margin-top:auto;padding:.6rem .8rem;border-top:1px solid rgba(255,255,255,.14);display:flex;flex-direction:column;gap:.32rem}
 .side-user{font-size:.88rem;margin-bottom:.2rem}
-.side-footer .btn{color:#fff;border-color:rgba(255,255,255,.35)}
+.side-footer .btn{color:#fff;border-color:rgba(255,255,255,.35);padding:.45rem .7rem;font-size:.88rem}
 .side-footer .btn:hover{background:rgba(255,255,255,.12)}
 
 .main{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -207,6 +208,7 @@ h3.view-h{margin-bottom:.4rem}
 .upload-preview{background:#f4ecf8;border:1px dashed #cbbbd4;object-fit:cover}
 .upload-preview.logo{width:190px;height:126px;border-radius:16px;object-fit:contain;background:#2A0530}
 .upload-preview.capa{width:230px;height:110px;border-radius:12px}
+.upload-acoes{display:flex;gap:8px;align-items:center}
 .upload-btn{cursor:pointer}
 
 /* relatório */
@@ -499,7 +501,9 @@ tr.ponto-aberto td{background:#fdf3d8}
   .sidebar{overflow:hidden;clip-path:inset(0);transition:width .28s ease}
   .sidebar .brand,.sidebar .side-footer{width:268px;flex:none}
   .sidebar .menu{width:268px}
-  .side-topo{display:block;width:268px;flex:none;padding:.75rem .7rem 0}
+  .side-topo{display:block;width:268px;flex:none;padding:.5rem .7rem 0}
+  body.menu-fixado .side-footer,.sidebar:hover .side-footer{display:grid;grid-template-columns:1fr 1fr;align-content:start}
+  body.menu-fixado .side-footer .side-user,.sidebar:hover .side-footer .side-user{grid-column:1/-1}
   .btn-menu-lateral{display:flex;flex-direction:column;justify-content:center;gap:5px;width:42px;height:42px;padding:0 .8rem;background:transparent;border:0;border-radius:10px;cursor:pointer}
   .btn-menu-lateral span{display:block;width:18px;height:2px;border-radius:2px;background:#f3e4f8}
   .btn-menu-lateral:hover{background:rgba(255,255,255,.1)}

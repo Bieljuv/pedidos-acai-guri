@@ -155,7 +155,7 @@ $('#loginForm').addEventListener('submit', async (e) => {
     localStorage.setItem('painel_token', state.token);
     localStorage.setItem('painel_user', JSON.stringify(state.user));
     iniciarApp();
-    if (data.senha_padrao) setTimeout(() => toast('Você ainda usa a senha padrão (admin123). Troque em "Trocar senha" — hoje ela é a maior brecha do sistema.', true), 700);
+    // v1.13.8 (decisao do Gabriel): sem aviso de senha padrao — admin123 fica, sem enchecao.
   } catch (err) {
     erro.textContent = err.message || 'Usuário ou senha inválidos.';
     erro.classList.remove('hidden');
@@ -293,12 +293,39 @@ function fmtDocumento(doc) {
   if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
   return d;
 }
+// Icone da aba do navegador (v1.13.5): a logo da loja desenhada sobre um
+// quadrado da COR dela. Logo branca/transparente some na abinha do navegador;
+// com o fundo da marca, aparece. Se algo falhar, usa a logo pura.
+function faviconDaLoja(url, cor) {
+  if (!url) return;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const x = c.getContext('2d');
+      const fundo = (p) => { x.beginPath(); if (x.roundRect) x.roundRect(0, 0, 64, 64, 14); else x.rect(0, 0, 64, 64); };
+      x.fillStyle = cor || '#7E047D'; fundo(); x.fill();
+      x.save(); fundo(); x.clip();
+      const esc = Math.max(56 / img.width, 56 / img.height);
+      const w = img.width * esc, h = img.height * esc;
+      x.drawImage(img, 4 + (56 - w) / 2, 4 + (56 - h) / 2, w, h);
+      x.restore();
+      let link = document.querySelector('link[rel="icon"]');
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.type = 'image/png'; link.href = c.toDataURL('image/png');
+    } catch { const link = document.querySelector('link[rel="icon"]'); if (link) link.href = url; }
+  };
+  img.src = url;
+}
+
 async function carregarLoja() {
   try {
     state.loja = await api('/api/painel/loja');
     const l = state.loja;
     $('#sideNome').textContent = l.nome || 'Minha loja';
     if (l.logo_url) { const img = $('#sideLogo'); img.src = l.logo_url; img.style.display = ''; }
+    faviconDaLoja(l.logo_url, l.cor_primaria);
     $('#toggleAberta').checked = !!l.aberta_manual;
     $('#lblAberta').textContent = l.aberta_manual ? 'Loja aberta' : 'Loja fechada';
     const pausada = !!l.pausada || (l.pausada_ate && new Date(l.pausada_ate) > new Date());
@@ -1347,6 +1374,14 @@ async function uploadLojaImagem(file, hiddenId, previewId) {
 $('#btnTestarSom').addEventListener('click', () => { pararSom(); tocarToque($('#lojaSom').value, false); });
 $('#fileLogo').addEventListener('change', (e) => { if (e.target.files[0]) uploadLojaImagem(e.target.files[0], '#lojaLogoUrl', '#logoPreview'); });
 $('#fileCapa').addEventListener('change', (e) => { if (e.target.files[0]) uploadLojaImagem(e.target.files[0], '#lojaCapaUrl', '#capaPreview'); });
+// Excluir logo/capa (v1.13.5): limpa o campo e a previa; aplica no "Salvar loja".
+function excluirImagemLoja(hiddenId, previewId) {
+  $(hiddenId).value = '';
+  const p = $(previewId); p.src = ''; p.style.opacity = .3;
+  toast('Imagem removida. Clique em "Salvar loja" para aplicar.');
+}
+$('#btnExcluirLogo').addEventListener('click', () => excluirImagemLoja('#lojaLogoUrl', '#logoPreview'));
+$('#btnExcluirCapa').addEventListener('click', () => excluirImagemLoja('#lojaCapaUrl', '#capaPreview'));
 $('#formLoja').addEventListener('submit', async (e) => {
   e.preventDefault();
   const payload = {
@@ -2890,8 +2925,16 @@ function iniciarApp() {
   if (!ehAdmin) iniciarPonto();
 }
 if (state.token) {
-  // valida a sessão carregando a loja; se 401, o api() desloga sozinho
-  iniciarApp();
+  // v1.13.10: valida a sessao salva ANTES de abrir o app. Token velho ou de
+  // outro banco e limpo EM SILENCIO — nada do toast "Sessao expirada"
+  // assustando na abertura (acontecia a cada troca de servidor/banco).
+  (async () => {
+    try {
+      const r = await fetch('/api/painel/loja', { headers: { Authorization: 'Bearer ' + state.token } });
+      if (!r.ok) throw new Error('sessao invalida');
+      iniciarApp();
+    } catch { sair(false); }
+  })();
 }
 
 /* Menu lateral retrátil (v1.9.26): o hambúrguer fixa/solta o menu aberto. */
@@ -2905,4 +2948,15 @@ if (state.token) {
     btn.title = fixo ? 'Soltar o menu (recolhe sozinho)' : 'Fixar o menu aberto';
   });
   if (document.body.classList.contains('menu-fixado')) btn.title = 'Soltar o menu (recolhe sozinho)';
+})();
+
+// Marca da loja na tela de login + favicon, antes mesmo de entrar (v1.13.5)
+(async () => {
+  try {
+    const r = await fetch('/api/public/loja');
+    if (!r.ok) return;
+    const l = await r.json();
+    if (l.logo_url) { const img = document.querySelector('.login-logo'); if (img) { img.src = l.logo_url; img.style.display = ''; } }
+    faviconDaLoja(l.logo_url, l.cor_primaria);
+  } catch { /* silencioso */ }
 })();

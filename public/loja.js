@@ -398,7 +398,13 @@ function renderLoja() {
     a.href = 'https://wa.me/' + soDigitos(loja.whatsapp);
     a.hidden = false;
   }
-  if (loja.endereco_texto) $('#rodape-endereco').textContent = loja.endereco_texto;
+  /* Rodape (v1.16.8 — pedido do Gabriel): no rodape vai so a CIDADE - UF
+     (a ultima parte do endereco cadastrado), nao o endereco completo —
+     o endereco inteiro segue guardado na ficha da loja. */
+  if (loja.endereco_texto) {
+    const partes = String(loja.endereco_texto).split(',').map((s) => s.trim()).filter(Boolean);
+    $('#rodape-endereco').textContent = partes.length > 1 ? partes[partes.length - 1] : loja.endereco_texto;
+  }
   // v1.9.15/16: nome fantasia + CNPJ/CPF no rodapé (quando a loja cadastrou
   // o documento; razão social não entra — decisão do Gabriel).
   if (loja.documento) {
@@ -1099,6 +1105,78 @@ const STATUS_TXT = {
 let tokenAcomp = null;
 let timerAcomp = null;
 
+/* Sons do acompanhamento (v1.16.7 — a "ousadia" do Gabriel): quando o
+   pedido SAI pra entrega, a motinho "liga e sai"; quando ENTREGUE, a
+   buzinadinha "bi-bi". Sem nenhum arquivo de audio: o som e
+   sintetizado na hora (WebAudio). Regras do navegador: som so toca
+   depois de algum toque do cliente na pagina — por isso o contexto
+   acorda no primeiro toque, e uma virada de status que acontece sem
+   toque nenhum fica esperando (ate 30s) pelo primeiro toque.
+   O cliente pode desligar no alto-falante do proprio cartao; a
+   escolha fica salva no aparelho. Nada aqui pode quebrar a tela:
+   tudo em try/catch. */
+let ctxSom = null;
+let somPendente = null; // { tipo, quando }
+function somDesligado() { try { return localStorage.getItem('loja_sem_som') === '1'; } catch { return false; } }
+function garantirCtxSom() {
+  if (somDesligado()) return null;
+  try {
+    if (!ctxSom) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; ctxSom = new AC(); }
+    if (ctxSom.state === 'suspended') ctxSom.resume();
+    return ctxSom;
+  } catch { return null; }
+}
+document.addEventListener('pointerdown', () => {
+  if (!garantirCtxSom()) return;
+  if (somPendente && Date.now() - somPendente.quando < 30000) tocarSomAcomp(somPendente.tipo);
+  somPendente = null;
+}, true);
+function dispararSomAcomp(tipo) {
+  const ctx = garantirCtxSom();
+  if (!ctx || ctx.state !== 'running') { somPendente = { tipo, quando: Date.now() }; return; }
+  tocarSomAcomp(tipo);
+}
+function tocarSomAcomp(tipo) {
+  const ctx = garantirCtxSom();
+  if (!ctx || ctx.state !== 'running') return;
+  try { if (tipo === 'partida') somPartida(ctx); else if (tipo === 'buzina') somBuzina(ctx); } catch { /* som nunca trava a tela */ }
+}
+function somPartida(ctx) {
+  const t = ctx.currentTime;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.09, t + 0.1);
+  g.gain.setValueAtTime(0.09, t + 1.0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 1.45);
+  const filtro = ctx.createBiquadFilter(); filtro.type = 'lowpass'; filtro.frequency.value = 520; filtro.Q.value = 2;
+  const osc = ctx.createOscillator(); osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(62, t);
+  osc.frequency.exponentialRampToValueAtTime(150, t + 0.55);
+  osc.frequency.exponentialRampToValueAtTime(185, t + 1.05);
+  const osc2 = ctx.createOscillator(); osc2.type = 'square';
+  osc2.frequency.setValueAtTime(31, t);
+  osc2.frequency.exponentialRampToValueAtTime(93, t + 1.05);
+  const g2 = ctx.createGain(); g2.gain.value = 0.5;
+  osc.connect(filtro); osc2.connect(g2); g2.connect(filtro);
+  filtro.connect(g); g.connect(ctx.destination);
+  osc.start(t); osc2.start(t); osc.stop(t + 1.5); osc2.stop(t + 1.5);
+}
+function somBuzina(ctx) {
+  const bip = (inicio) => {
+    const t = ctx.currentTime + inicio;
+    const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = 840;
+    const osc2 = ctx.createOscillator(); osc2.type = 'square'; osc2.frequency.value = 1180;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.015);
+    g.gain.setValueAtTime(0.12, t + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    const g2 = ctx.createGain(); g2.gain.value = 0.35;
+    osc.connect(g); osc2.connect(g2); g2.connect(g); g.connect(ctx.destination);
+    osc.start(t); osc2.start(t); osc.stop(t + 0.16); osc2.stop(t + 0.16);
+  };
+  bip(0); bip(0.21); // bi-bi
+}
+
 function linhasOpcoesPedido(item) {
   const ops = item.opcoes || [];
   if (!ops.length) return '';
@@ -1141,6 +1219,19 @@ function renderAcompanhamento(d) {
     if (st === 'CANCELADO' && h.motivo) motivoCancel = h.motivo;
   }
   const cancelado = d.status === 'CANCELADO';
+  /* A animacao do motoboy vai DENTRO da linha do tempo, literalmente
+     abaixo da etapa "Saiu para entrega" (v1.16.8 — correcao do
+     Gabriel: nao e sob o titulo do cartao, e sob a ETAPA; assim o
+     cliente que acompanha as etapas ve a moto no passo certo). */
+  const motoTimelineHTML = (d.tipo === 'entrega' && d.status === 'SAIU_ENTREGA') ? `
+    <div class="tl-moto">
+      <div class="moto-cena rapido" aria-hidden="true">
+        <span class="moto-vento v1"></span><span class="moto-vento v2"></span><span class="moto-vento v3"></span>
+        <img class="moto-img" src="/img/motoboy.png" alt="">
+        <span class="moto-chao"></span>
+      </div>
+      <p class="moto-legenda">Ele já está a caminho da sua casa!</p>
+    </div>` : '';
   const timeline = cancelado ? '' : `<div class="timeline">${etapasBase.map((st, i) => `
     <div class="tl-etapa ${i < idxAtual ? 'feita' : ''} ${i === idxAtual ? 'atual feita' : ''}">
       <span class="tl-bola">${i < idxAtual || i === idxAtual ? icLoja('check') : ''}</span>
@@ -1148,7 +1239,7 @@ function renderAcompanhamento(d) {
         <div class="tl-nome">${NOMES_ETAPA[st]}</div>
         ${horas[st] ? `<div class="tl-hora">às ${horas[st]}</div>` : ''}
       </div>
-    </div>`).join('')}</div>`;
+    </div>${st === 'SAIU_ENTREGA' ? motoTimelineHTML : ''}`).join('')}</div>`;
 
   /* pagamento online */
   const pag = d.pagamento || ultimoPagamento;
@@ -1223,18 +1314,13 @@ function renderAcompanhamento(d) {
       </div>`;
     }
   }
-  const motoHTML = (d.tipo === 'entrega' && d.status === 'SAIU_ENTREGA') ? `
-    <div class="moto-cena rapido" aria-hidden="true">
-      <span class="moto-vento v1"></span><span class="moto-vento v2"></span><span class="moto-vento v3"></span>
-      <img class="moto-img" src="/img/motoboy.png" alt="">
-      <span class="moto-chao"></span>
-    </div>
-    <p class="moto-legenda">Ele já está a caminho da sua casa!</p>` : '';
   cont.innerHTML = `
   <div class="acomp-card">
-    <div class="acomp-numero">Pedido #${d.numero}</div>
+    <div class="acomp-topo">
+      <div class="acomp-numero">Pedido #${d.numero}</div>
+      ${d.tipo === 'entrega' && !cancelado ? `<button type="button" id="btn-som-acomp" class="btn-som" aria-label="${somDesligado() ? 'Ligar os sons do acompanhamento' : 'Desligar os sons do acompanhamento'}" title="${somDesligado() ? 'Sons desligados' : 'Sons ligados'}">${icLoja(somDesligado() ? 'mudo' : 'som')}</button>` : ''}
+    </div>
     <p class="acomp-status-txt">${esc(STATUS_TXT[d.status] || d.status)}</p>
-    ${motoHTML}
     ${fidelHTML}
     ${codigoHTML}
     ${cancelado ? `<div class="cancelado-box">Pedido cancelado${motivoCancel ? ` — ${esc(motivoCancel)}` : ''}.</div>` : timeline}
@@ -1258,11 +1344,31 @@ function renderAcompanhamento(d) {
   });
   const btnNovo = $('#btn-novo-pedido');
   if (btnNovo) btnNovo.addEventListener('click', () => { location.hash = '#/'; });
+  const btnSom = $('#btn-som-acomp');
+  if (btnSom) btnSom.addEventListener('click', () => {
+    const desligado = !somDesligado();
+    try { localStorage.setItem('loja_sem_som', desligado ? '1' : '0'); } catch { /* sem storage */ }
+    if (desligado && ctxSom) { try { ctxSom.close(); } catch { /* ok */ } ctxSom = null; somPendente = null; }
+    btnSom.innerHTML = icLoja(desligado ? 'mudo' : 'som');
+    btnSom.title = desligado ? 'Sons desligados' : 'Sons ligados';
+    toast(desligado ? 'Sons do acompanhamento desligados.' : 'Sons do acompanhamento ligados.');
+  });
 }
+let statusAnteriorAcomp = undefined; // undefined = primeira carga desta tela
 async function carregarAcompanhamento() {
   if (!tokenAcomp) return;
   try {
     const d = await getJSON('/api/public/pedidos/' + encodeURIComponent(tokenAcomp));
+    /* Sons das viradas (v1.16.7): a virada acontece com a tela aberta;
+       se a tela JA abre no status, o som espera o primeiro toque. */
+    if (statusAnteriorAcomp !== undefined && statusAnteriorAcomp !== d.status) {
+      if (d.status === 'SAIU_ENTREGA') dispararSomAcomp('partida');
+      else if (d.status === 'ENTREGUE') dispararSomAcomp('buzina');
+    } else if (statusAnteriorAcomp === undefined) {
+      if (d.status === 'SAIU_ENTREGA') somPendente = { tipo: 'partida', quando: Date.now() };
+      else if (d.status === 'ENTREGUE') somPendente = { tipo: 'buzina', quando: Date.now() };
+    }
+    statusAnteriorAcomp = d.status;
     renderAcompanhamento(d);
     if (d.status === 'ENTREGUE' || d.status === 'CANCELADO') pararPolling();
   } catch {
@@ -1273,6 +1379,8 @@ async function carregarAcompanhamento() {
 function pararPolling() { if (timerAcomp) { clearInterval(timerAcomp); timerAcomp = null; } }
 function iniciarAcompanhamento(token) {
   tokenAcomp = token;
+  statusAnteriorAcomp = undefined;
+  somPendente = null;
   pararPolling();
   carregarAcompanhamento();
   timerAcomp = setInterval(carregarAcompanhamento, 5000);

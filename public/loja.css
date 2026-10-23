@@ -196,6 +196,8 @@ body.rolou .hnome{opacity:1;transform:none}
 
 .rodape{padding:34px 6px 110px; text-align:center; color:var(--ink-suave); font-size:13px}
 .rodape-assinatura{margin-top:6px}
+/* Marca do sistema (v1.16.8): credito discreto, estilo marca d'agua. */
+.rodape-credito{margin-top:14px; font-size:11px; letter-spacing:.04em; opacity:.55}
 
 /* ===== Barra fixa do carrinho ===== */
 .barra-carrinho{
@@ -373,6 +375,13 @@ body.rolou .hnome{opacity:1;transform:none}
   padding:18px 16px; margin-top:10px;
 }
 .acomp-numero{font-size:22px; font-weight:900}
+.acomp-topo{display:flex; align-items:center; justify-content:space-between; gap:10px}
+.btn-som{
+  flex:none; width:40px; height:40px; border-radius:50%; cursor:pointer;
+  border:1.5px solid var(--linha); background:transparent; color:var(--primary);
+  display:flex; align-items:center; justify-content:center;
+}
+.btn-som .ic{width:20px; height:20px}
 .acomp-status-txt{font-size:15px; color:var(--ink-suave); margin-top:4px}
 .timeline{margin-top:20px; position:relative; padding-left:6px}
 .tl-etapa{display:flex; gap:14px; position:relative; padding-bottom:22px}
@@ -539,6 +548,9 @@ body.rolou .hnome{opacity:1;transform:none}
 :root[data-tema="escuro"] .opcao{color:var(--ink)}
 
 /* ---------- motoboy animado (tela de acompanhamento) ---------- */
+/* Dentro da linha do tempo, sob a etapa "Saiu para entrega" (v1.16.8):
+   recuo igual ao do texto das etapas (bolinha 26px + espaco 14px). */
+.tl-moto{margin:0 0 10px 40px}
 .moto-cena{position:relative;overflow:hidden;border-radius:12px;background:linear-gradient(180deg,#f8f0fc,#edd9f8);height:116px;margin:10px 0 4px}
 .moto-img{position:absolute;left:50%;bottom:9px;height:100px;width:auto;mix-blend-mode:multiply;animation:motoBob .45s ease-in-out infinite alternate}
 @keyframes motoBob{from{transform:translateX(-50%) translateY(0) rotate(-.3deg)}to{transform:translateX(-50%) translateY(-4px) rotate(.3deg)}}

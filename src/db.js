@@ -398,7 +398,7 @@ function seedSqlite() {
   sq.exec('BEGIN');
   try {
     sq.prepare(`INSERT INTO lojas (id, nome, slug, logo_url, whatsapp, instagram, endereco_texto, tempo_preparo_min, tempo_entrega_min, aberta_manual, horario_abre, horario_fecha)
-      VALUES (1, 'Açaí do Guri', 'acai-do-guri', '/uploads/seed-logo.png', '5547999842490', '@acaidoguri.bc', 'Rua Canoinhas, 247, Balneário Camboriú', 30, 40, 1, '14:00', '22:00')`).run();
+      VALUES (1, 'Açaí do Guri', 'acai-do-guri', '/uploads/seed-logo.png', '5547999842490', '@acaidoguri.bc', 'Rua Canoinhas, 247, Balneário Camboriú - SC', 30, 40, 1, '14:00', '22:00')`).run();
     sq.prepare(`INSERT INTO usuarios (loja_id, nome, login, senha_hash, perfil) VALUES (1, 'Administrador', 'admin', ?, 'admin')`).run(ADMIN_HASH);
 
     const cat = sq.prepare('INSERT INTO categorias (loja_id, nome, ordem) VALUES (1, ?, ?)');
@@ -449,7 +449,7 @@ function seedSqlite() {
 async function seedPg() {
   await tx(async (q) => {
     await q.run(`INSERT INTO lojas (id, nome, slug, logo_url, whatsapp, instagram, endereco_texto, tempo_preparo_min, tempo_entrega_min, aberta_manual, horario_abre, horario_fecha)
-      VALUES (1, 'Açaí do Guri', 'acai-do-guri', '/uploads/seed-logo.png', '5547999842490', '@acaidoguri.bc', 'Rua Canoinhas, 247, Balneário Camboriú', 30, 40, 1, '14:00', '22:00')`);
+      VALUES (1, 'Açaí do Guri', 'acai-do-guri', '/uploads/seed-logo.png', '5547999842490', '@acaidoguri.bc', 'Rua Canoinhas, 247, Balneário Camboriú - SC', 30, 40, 1, '14:00', '22:00')`);
     // id explícito na loja: realinha a sequence pra não colidir no futuro.
     await q.run("SELECT setval(pg_get_serial_sequence('lojas','id'), (SELECT COALESCE(MAX(id), 1) FROM lojas))");
     await q.run(`INSERT INTO usuarios (loja_id, nome, login, senha_hash, perfil) VALUES (1, 'Administrador', 'admin', ?, 'admin')`, ADMIN_HASH);

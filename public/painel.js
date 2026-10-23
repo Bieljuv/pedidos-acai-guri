@@ -931,9 +931,21 @@ function renderProdutos() {
 $('#buscaProduto').addEventListener('input', renderProdutos);
 $('#btnNovoProduto').addEventListener('click', () => modalProduto(null));
 
-function modalProduto(prod) {
+async function modalProduto(prod) {
   const edit = !!prod;
   prod = prod || { nome:'', descricao:'', categoria_id: state.categorias[0]?.id || '', tipo:'simples', preco_base_centavos:0, foto_url:'', destaque:false, esgotado:false, ativo:true, ordem:0, grupo_ids: [] };
+  // Vinculos REAIS do produto (v1.15.4): a lista de produtos nao traz os
+  // grupos, entao o editor abria com TODAS as caixas desmarcadas — e salvar
+  // (mesmo so mudando a descricao) apagava os vinculos do banco, quebrando
+  // o montador na loja. Era o "salvar nao salva" do Gabriel. Busca antes de
+  // montar o formulario; se a busca falhar, NAO abre (melhor que abrir
+  // mentindo o estado atual).
+  if (edit && !Array.isArray(prod.grupo_ids)) {
+    try {
+      const gs = await api('/api/painel/produtos/' + prod.id + '/grupos');
+      prod.grupo_ids = (Array.isArray(gs) ? gs : []).map(g => Number(g.grupo_id ?? g.id));
+    } catch (err) { toast('Não consegui carregar os grupos deste produto: ' + err.message, true); return; }
+  }
   const vinculados = new Set((prod.grupo_ids || (prod.grupos || []).map(g => g.id) || []).map(String));
   const body = openModal(edit ? 'Editar produto' : 'Novo produto', `
     <form id="formProd">

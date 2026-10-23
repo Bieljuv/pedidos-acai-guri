@@ -161,6 +161,12 @@ h3.view-h{margin-bottom:.4rem}
 /* ---------- cardápio / cadastros ---------- */
 .alerta-exemplo{background:#fdf3d8;border:1px solid var(--warn);color:#7a5b00;border-radius:10px;padding:.6rem .9rem;font-size:.88rem;margin-bottom:1rem;font-weight:600}
 .bloco{background:#fff;border:1px solid var(--linha);border-radius:14px;padding:1rem;margin-bottom:1rem}
+/* Caixas expansiveis (v1.16.11): cabeca clicavel, corpo recolhido */
+.bloco-exp .bloco-head{cursor:pointer;user-select:none}
+.bloco-exp .bloco-corpo{display:none}
+.bloco-exp.aberto .bloco-corpo{display:block}
+.bloco-exp .exp-seta{margin-left:auto;display:flex;color:var(--ink-suave,#8a7d94);transition:transform .2s ease}
+.bloco-exp.aberto .exp-seta{transform:rotate(180deg)}
 /* Sorteio ativo/divulgado (v1.16.9) */
 .sor-ativo-box{border:1.5px solid var(--cor-primaria,#7E047D);border-radius:12px;padding:12px 14px;background:rgba(126,4,125,.06);margin-bottom:.6rem}
 .sor-ativo-tit{font-weight:800;color:var(--cor-primaria,#7E047D);text-transform:uppercase;font-size:.72rem;letter-spacing:.06em;margin-bottom:.3rem}

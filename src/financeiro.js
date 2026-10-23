@@ -56,8 +56,21 @@ function dataValida(s) {
   return dt.getFullYear() === a && dt.getMonth() === m - 1 && dt.getDate() === d;
 }
 function dataBR(s) { // YYYY-MM-DD -> DD/MM/YYYY
+  // No Postgres o dia volta como objeto Date (no SQLite, texto) — sem
+  // tratar, o PDF imprimia o Date cru ("Fri Oct 23 2026 00:00:00...").
+  if (s instanceof Date) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(s.getDate())}/${p(s.getMonth() + 1)}/${s.getFullYear()}`;
+  }
   const [a, m, d] = String(s || '').split('-');
   return a && m && d ? `${d}/${m}/${a}` : String(s || '');
+}
+function diaISO(d) { // Date ou texto -> 'YYYY-MM-DD'
+  if (d instanceof Date) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  return String(d || '');
 }
 // round half up (valores aqui são >= 0)
 const roundHU = (x) => Math.floor(Number(x) + 0.5);
@@ -288,6 +301,7 @@ async function relatorioMensal(mes) {
        FROM pedidos p
       WHERE p.loja_id=1 AND ${PERIODO_PEDIDOS} AND p.status='CANCELADO'
       GROUP BY dia ORDER BY dia`, primeiro, ultimo);
+  for (const r of [...conclPorDia, ...cancPorDia]) r.dia = diaISO(r.dia); // PG devolve Date; SQLite, texto
   const cancMap = new Map(cancPorDia.map((r) => [r.dia, r.c]));
   const diasSet = new Set([...conclPorDia.map((r) => r.dia), ...cancPorDia.map((r) => r.dia)]);
   const dias = [...diasSet].sort().map((dia) => {
@@ -385,34 +399,99 @@ function gerarXmlMensal(nomeLoja, { rel, pedidos, lancamentos, insumos }) {
   return linhas.join('\n') + '\n';
 }
 
-// ---------- PDF do relatório ----------
+// ---------- PDF dos relatórios (visual limpo — v1.16.12) ----------
+/* Pedido do Gabriel: relatorio NAO precisa das cores do sistema.
+   Documento normal — preto e cinza, linhas finas — com a LOGO da
+   loja no cabecalho (a logo salva no cadastro da loja). */
 const fmtMoeda = (cent) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(cent || 0) / 100);
-function gerarPdfRelatorio(resumo, nomeLoja, res) {
+
+/* Carrega os bytes da logo da loja: URL externa (Supabase Storage)
+   via fetch, ou arquivo local de public/. Qualquer falha = sem logo
+   (o relatorio sai so com o nome — nunca trava por causa dela). */
+async function carregarLogo(logoUrl) {
+  try {
+    if (!logoUrl) return null;
+    if (/^https?:\/\//i.test(logoUrl)) {
+      const r = await fetch(logoUrl, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return null;
+      return Buffer.from(await r.arrayBuffer());
+    }
+    if (logoUrl.startsWith('/')) {
+      const fs = require('fs');
+      const path = require('path');
+      const base = path.join(__dirname, '..', 'public');
+      const alvo = path.normalize(path.join(base, logoUrl));
+      if (!alvo.startsWith(base)) return null;
+      return fs.readFileSync(alvo);
+    }
+    return null;
+  } catch { return null; }
+}
+
+function abrirDocRelatorio(res, filename) {
   const PDFDocument = require('pdfkit');
   const doc = new PDFDocument({ size: 'A4', margin: 48 });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="relatorio-${resumo.data}.pdf"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   doc.pipe(res);
+  return doc;
+}
 
-  const ROXO = '#7E047D', ESCURO = '#2A0530', CINZA = '#666666';
-  const fin = resumo.financeiro;
+const PDF_PRETO = '#141414', PDF_CINZA = '#5A5A5A', PDF_LINHA = '#C9C9C9';
+function pecasRelatorio(doc) {
   const linha = (rotulo, valor, opts = {}) => {
     doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(opts.size || 11)
-      .fillColor(opts.color || ESCURO)
+      .fillColor(PDF_PRETO)
       .text(rotulo, 48, doc.y, { continued: true })
       .text(valor, { align: 'right' });
     doc.moveDown(opts.gap != null ? opts.gap : 0.25);
   };
   const titulo = (t) => {
-    doc.moveDown(0.6).font('Helvetica-Bold').fontSize(13).fillColor(ROXO).text(t);
-    doc.moveTo(48, doc.y + 2).lineTo(547, doc.y + 2).strokeColor(ROXO).lineWidth(1).stroke();
-    doc.moveDown(0.5).fillColor(ESCURO);
+    // x forcado em 48: depois da tabela de dias o cursor x do pdfkit
+    // fica deslocado e o titulo nascia no meio da pagina.
+    doc.x = 48;
+    doc.moveDown(0.6).font('Helvetica-Bold').fontSize(12).fillColor(PDF_PRETO).text(t, 48, doc.y);
+    doc.moveTo(48, doc.y + 2).lineTo(547, doc.y + 2).strokeColor(PDF_LINHA).lineWidth(0.8).stroke();
+    doc.moveDown(0.5);
   };
+  const rodape = () => {
+    const agoraLocal = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    doc.font('Helvetica').fontSize(9).fillColor(PDF_CINZA)
+      .text(`Gerado em ${agoraLocal} — Sistema de Pedidos`, 48, 780, { align: 'center' });
+  };
+  return { linha, titulo, rodape };
+}
 
-  // Cabeçalho
-  doc.font('Helvetica-Bold').fontSize(20).fillColor(ROXO).text(nomeLoja || 'Loja');
-  doc.font('Helvetica').fontSize(13).fillColor(ESCURO).text(`Relatório do dia — ${dataBR(resumo.data)}`);
+/* Cabecalho: a logo da loja (se houver e o pdfkit conseguir usar —
+   PNG/JPEG) ao lado do nome; senao, so o nome. Tudo em preto/cinza. */
+function cabecalhoRelatorio(doc, nomeLoja, logoBuffer, subtitulo) {
+  let textoX = 48;
+  if (logoBuffer) {
+    try {
+      const img = doc.openImage(logoBuffer);
+      const escala = Math.min(48 / img.height, 170 / img.width);
+      const w = Math.round(img.width * escala), h = Math.round(img.height * escala);
+      doc.image(img, 48, 44, { width: w, height: h });
+      textoX = 48 + w + 14;
+      doc.y = 44;
+    } catch { textoX = 48; /* formato nao suportado: segue sem logo */ }
+  }
+  doc.font('Helvetica-Bold').fontSize(19).fillColor(PDF_PRETO).text(nomeLoja || 'Loja', textoX, 48, { width: 547 - textoX });
+  doc.font('Helvetica').fontSize(12).fillColor(PDF_CINZA).text(subtitulo, textoX, doc.y + 2, { width: 547 - textoX });
+  doc.x = 48;
+  doc.y = Math.max(doc.y + 6, 104);
+  doc.moveTo(48, doc.y).lineTo(547, doc.y).strokeColor(PDF_LINHA).lineWidth(0.8).stroke();
   doc.moveDown(0.4);
+}
+
+function gerarPdfRelatorio(resumo, lojaInfo, res) {
+  const doc = abrirDocRelatorio(res, `relatorio-${resumo.data}.pdf`);
+  const { linha, titulo, rodape } = pecasRelatorio(doc);
+  const fin = resumo.financeiro;
+  const nome = typeof lojaInfo === 'string' ? lojaInfo : (lojaInfo && lojaInfo.nome);
+  const logo = lojaInfo && typeof lojaInfo === 'object' ? lojaInfo.logo : null;
+
+  cabecalhoRelatorio(doc, nome, logo, `Relatório do dia — ${dataBR(resumo.data)}`);
 
   titulo('VENDAS');
   linha('Pedidos concluídos', String(resumo.pedidos_concluidos));
@@ -426,11 +505,11 @@ function gerarPdfRelatorio(resumo, nomeLoja, res) {
   linha('Cartão', `${resumo.por_pagamento.cartao.pedidos} pedido(s) — ${fmtMoeda(resumo.por_pagamento.cartao.valor_centavos)}`);
 
   titulo('TOP PRODUTOS');
-  if (!resumo.top_produtos.length) doc.font('Helvetica').fontSize(11).text('Nenhuma venda concluída neste dia.');
+  if (!resumo.top_produtos.length) doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO).text('Nenhuma venda concluída neste dia.');
   for (const p of resumo.top_produtos) linha(`${p.nome} × ${p.qtd}`, fmtMoeda(p.valor_centavos));
 
   titulo('TOP OPÇÕES');
-  if (!resumo.top_opcoes.length) doc.font('Helvetica').fontSize(11).text('Nenhuma opção registrada neste dia.');
+  if (!resumo.top_opcoes.length) doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO).text('Nenhuma opção registrada neste dia.');
   for (const o of resumo.top_opcoes) linha(`${o.nome}`, `× ${o.qtd}`);
 
   titulo('FINANCEIRO DO DIA');
@@ -442,48 +521,27 @@ function gerarPdfRelatorio(resumo, nomeLoja, res) {
   linha('Despesas', fmtMoeda(fin.despesas));
   linha('Custo total', fmtMoeda(fin.custo_total));
   doc.moveDown(0.3);
-  doc.font('Helvetica-Bold').fontSize(16).fillColor(fin.lucro_real >= 0 ? '#1A7F37' : '#C0392B')
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(PDF_PRETO)
     .text(`LUCRO REAL: ${fmtMoeda(fin.lucro_real)}`);
-  doc.font('Helvetica').fontSize(11).fillColor(ESCURO)
+  doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO)
     .text(`Custo por copo: ${fmtMoeda(fin.custo_por_copo)} · Preço médio por copo: ${fmtMoeda(fin.preco_medio_copo)} · Lucro por copo: ${fmtMoeda(fin.lucro_por_copo)}`);
 
-  // Rodapé
-  const agoraLocal = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-  doc.font('Helvetica').fontSize(9).fillColor(CINZA)
-    .text(`Gerado em ${agoraLocal} — Sistema de Pedidos`, 48, 780, { align: 'center' });
+  rodape();
   doc.end();
 }
 
 // ---------- PDF do relatório MENSAL (v1.7) ----------
 const ROTULO_FORMA = { pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Cartão', pix_mp: 'Pix (MP)', cartao_mp: 'Cartão (MP)', pix_asaas: 'Pix (Asaas)', cartao_asaas: 'Cartão (Asaas)' };
-function gerarPdfRelatorioMensal(rel, nomeLoja, res) {
-  const PDFDocument = require('pdfkit');
-  const doc = new PDFDocument({ size: 'A4', margin: 48 });
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="relatorio-mensal-${rel.mes}.pdf"`);
-  doc.pipe(res);
-
-  const ROXO = '#7E047D', ESCURO = '#2A0530', CINZA = '#666666';
+function gerarPdfRelatorioMensal(rel, lojaInfo, res) {
+  const doc = abrirDocRelatorio(res, `relatorio-mensal-${rel.mes}.pdf`);
+  const { linha, titulo, rodape } = pecasRelatorio(doc);
   const fin = rel.financeiro;
-  const linha = (rotulo, valor, opts = {}) => {
-    doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(opts.size || 11)
-      .fillColor(opts.color || ESCURO)
-      .text(rotulo, 48, doc.y, { continued: true })
-      .text(valor, { align: 'right' });
-    doc.moveDown(opts.gap != null ? opts.gap : 0.25);
-  };
-  const titulo = (t) => {
-    doc.moveDown(0.6).font('Helvetica-Bold').fontSize(13).fillColor(ROXO).text(t);
-    doc.moveTo(48, doc.y + 2).lineTo(547, doc.y + 2).strokeColor(ROXO).lineWidth(1).stroke();
-    doc.moveDown(0.5).fillColor(ESCURO);
-  };
+  const nome = typeof lojaInfo === 'string' ? lojaInfo : (lojaInfo && lojaInfo.nome);
+  const logo = lojaInfo && typeof lojaInfo === 'object' ? lojaInfo.logo : null;
 
-  // Cabeçalho — "Relatório mensal — <mês por extenso>/<ano>"
   const [ano, mesNum] = rel.mes.split('-').map(Number);
   const mesExtenso = new Date(ano, mesNum - 1, 1).toLocaleDateString('pt-BR', { month: 'long' });
-  doc.font('Helvetica-Bold').fontSize(20).fillColor(ROXO).text(nomeLoja || 'Loja');
-  doc.font('Helvetica').fontSize(13).fillColor(ESCURO).text(`Relatório mensal — ${mesExtenso}/${ano}`);
-  doc.moveDown(0.4);
+  cabecalhoRelatorio(doc, nome, logo, `Relatório mensal — ${mesExtenso}/${ano}`);
 
   titulo('RESUMO DO MÊS');
   linha('Pedidos concluídos', String(rel.totais.pedidos_concluidos));
@@ -492,7 +550,7 @@ function gerarPdfRelatorioMensal(rel, nomeLoja, res) {
   linha('Ticket médio', fmtMoeda(rel.totais.ticket_medio_centavos));
 
   titulo('POR FORMA DE PAGAMENTO');
-  if (!rel.por_pagamento.length) doc.font('Helvetica').fontSize(11).text('Nenhuma venda concluída neste mês.');
+  if (!rel.por_pagamento.length) doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO).text('Nenhuma venda concluída neste mês.');
   for (const f of rel.por_pagamento) {
     linha(ROTULO_FORMA[f.forma] || f.forma, `${f.qtd} pedido(s) — ${fmtMoeda(f.total_centavos)}`);
   }
@@ -500,7 +558,7 @@ function gerarPdfRelatorioMensal(rel, nomeLoja, res) {
   titulo('VENDAS POR DIA');
   let y = doc.y;
   const cel = (txt, x, w, align, bold) => {
-    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10).fillColor(ESCURO)
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10).fillColor(PDF_PRETO)
       .text(String(txt), x, y, { width: w, align: align || 'left', lineBreak: false });
   };
   const novaPaginaSePreciso = () => { if (y > 740) { doc.addPage(); y = 56; } };
@@ -510,9 +568,9 @@ function gerarPdfRelatorioMensal(rel, nomeLoja, res) {
   cel('Faturamento', 326, 110, 'right', true);
   cel('Ticket médio', 444, 103, 'right', true);
   y += 15;
-  doc.moveTo(48, y).lineTo(547, y).strokeColor(ROXO).lineWidth(0.7).stroke();
+  doc.moveTo(48, y).lineTo(547, y).strokeColor(PDF_LINHA).lineWidth(0.7).stroke();
   y += 5;
-  if (!rel.dias.length) { doc.font('Helvetica').fontSize(11).text('Nenhum pedido neste mês.', 48, y); y += 16; }
+  if (!rel.dias.length) { doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO).text('Nenhum pedido neste mês.', 48, y); y += 16; }
   for (const d of rel.dias) {
     novaPaginaSePreciso();
     cel(dataBR(d.data), 48, 90);
@@ -523,7 +581,7 @@ function gerarPdfRelatorioMensal(rel, nomeLoja, res) {
     y += 15;
   }
   y += 2;
-  doc.moveTo(48, y).lineTo(547, y).strokeColor(ROXO).lineWidth(0.7).stroke();
+  doc.moveTo(48, y).lineTo(547, y).strokeColor(PDF_LINHA).lineWidth(0.7).stroke();
   y += 5;
   novaPaginaSePreciso();
   cel('TOTAL', 48, 90, 'left', true);
@@ -542,16 +600,14 @@ function gerarPdfRelatorioMensal(rel, nomeLoja, res) {
   linha('Despesas', fmtMoeda(fin.despesas));
   linha('Custo total', fmtMoeda(fin.custo_total));
   doc.moveDown(0.3);
-  doc.font('Helvetica-Bold').fontSize(14).fillColor(fin.lucro_operacional_centavos >= 0 ? '#1A7F37' : '#C0392B')
+  doc.font('Helvetica-Bold').fontSize(13).fillColor(PDF_PRETO)
     .text(`LUCRO DAS VENDAS (OPERACIONAL): ${fmtMoeda(fin.lucro_operacional_centavos)}`);
-  doc.font('Helvetica-Bold').fontSize(16).fillColor(fin.lucro_real >= 0 ? '#1A7F37' : '#C0392B')
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(PDF_PRETO)
     .text(`RESULTADO APÓS INVESTIMENTOS: ${fmtMoeda(fin.lucro_real)}`);
-  doc.font('Helvetica').fontSize(11).fillColor(ESCURO)
+  doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO)
     .text(`Custo por copo: ${fmtMoeda(fin.custo_por_copo)} · Preço médio por copo: ${fmtMoeda(fin.preco_medio_copo)} · Lucro por copo: ${fmtMoeda(fin.lucro_por_copo)}`);
 
-  const agoraLocal = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-  doc.font('Helvetica').fontSize(9).fillColor(CINZA)
-    .text(`Gerado em ${agoraLocal} — Sistema de Pedidos`, 48, 780, { align: 'center' });
+  rodape();
   doc.end();
 }
 
@@ -561,5 +617,5 @@ module.exports = {
   listarInsumos, criarInsumo, atualizarInsumo, excluirInsumo,
   calcular, calcularPeriodo, resumoRelatorio, relatorioMensal,
   dadosXmlMensal, gerarXmlMensal, escapeXml,
-  gerarPdfRelatorio, gerarPdfRelatorioMensal,
+  gerarPdfRelatorio, gerarPdfRelatorioMensal, carregarLogo,
 };

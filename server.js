@@ -669,12 +669,14 @@ app.get('/api/painel/relatorio/pdf', auth, soAdmin, h(async (req, res) => {
     const mes = String(req.query.mes || '');
     if (!financeiro.mesValido(mes)) return res.status(422).json({ erro: 'Mês inválido. Use o formato AAAA-MM.' });
     const loja = await pedidosCore.getLoja();
-    return financeiro.gerarPdfRelatorioMensal(await financeiro.relatorioMensal(mes), loja ? loja.nome : 'Loja', res);
+    const info = { nome: loja ? loja.nome : 'Loja', logo: await financeiro.carregarLogo(loja && loja.logo_url) };
+    return financeiro.gerarPdfRelatorioMensal(await financeiro.relatorioMensal(mes), info, res);
   }
   const data = req.query.data ? String(req.query.data) : financeiro.dataHoje();
   if (!financeiro.dataValida(data)) return res.status(422).json({ erro: 'Data inválida. Use o formato AAAA-MM-DD.' });
   const loja = await pedidosCore.getLoja();
-  financeiro.gerarPdfRelatorio(await financeiro.resumoRelatorio(data), loja ? loja.nome : 'Loja', res);
+  const info = { nome: loja ? loja.nome : 'Loja', logo: await financeiro.carregarLogo(loja && loja.logo_url) };
+  financeiro.gerarPdfRelatorio(await financeiro.resumoRelatorio(data), info, res);
 }));
 // Relatório mensal (v1.7): JSON p/ a tela + XML gerencial p/ a contabilidade.
 app.get('/api/painel/relatorio/mensal', auth, soAdmin, h(async (req, res) => {
@@ -794,7 +796,15 @@ app.get('/api/painel/fidelidade', auth, soAdmin, h(async (req, res) => {
   });
 }));
 app.get('/api/painel/fidelidade/sorteio/participantes', auth, soAdmin, h(async (req, res) => {
-  const parts = await fidelidade.participantes(String(req.query.ini || '') || null, String(req.query.fim || '') || null);
+  // Com sorteio_id: participantes PELA REGRA DO SORTEIO (compras feitas
+  // com ele ativo). Sem: contagem por periodo (compatibilidade).
+  let parts;
+  if (req.query.sorteio_id) {
+    const s = await fidelidade.sorteioPorId(Number(req.query.sorteio_id));
+    parts = s ? await fidelidade.participantesDoSorteio(s) : [];
+  } else {
+    parts = await fidelidade.participantes(String(req.query.ini || '') || null, String(req.query.fim || '') || null);
+  }
   res.json({
     clientes: parts.length,
     chances: parts.reduce((s, p) => s + Number(p.compras), 0),

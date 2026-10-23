@@ -579,8 +579,9 @@
           </div>
         </form>
 
-        <div class="bloco">
+        <div class="bloco bloco-exp" data-exp="cupons">
           <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-tag"></use></svg> Cupons de desconto</h3></div>
+          <div class="bloco-corpo">
           <p class="dica">Crie um código e divulgue (ex.: no Instagram). O cliente digita no fechamento do pedido e o desconto entra na hora — calculado sobre os produtos, sem mexer na taxa de entrega.</p>
           <form id="formCupom" class="card-form">
             <div class="grid-3">
@@ -613,21 +614,27 @@
             </div>
           </form>
           <div id="cupLista"><p class="dica">Carregando…</p></div>
+          </div>
         </div>
 
-        <div class="bloco">
+        <div class="bloco bloco-exp" data-exp="premios">
           <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Prêmios dos clientes</h3></div>
+          <div class="bloco-corpo">
           <div id="fidPremios"><p class="dica">Carregando…</p></div>
+          </div>
         </div>
 
-        <div class="bloco">
+        <div class="bloco bloco-exp" data-exp="ranking">
           <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-heart"></use></svg> Clientes que mais voltam</h3></div>
+          <div class="bloco-corpo">
           <div id="fidRanking"><p class="dica">Carregando…</p></div>
+          </div>
         </div>
 
-        <div class="bloco">
+        <div class="bloco bloco-exp" data-exp="sorteio">
           <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Sorteio de promoções</h3></div>
-          <p class="dica">Participa quem fez compra <strong>entregue</strong> no período — cada compra vale 1 chance (quem compra mais, tem mais chance). <strong>Crie o sorteio</strong>: ele é anunciado pros clientes na hora (na vitrine e na finalização da compra). Quando quiser, você sorteia o ganhador aqui — ele recebe o vale automaticamente e você é avisado no Telegram.</p>
+          <div class="bloco-corpo">
+          <p class="dica"><strong>Crie o sorteio</strong>: ele é anunciado pros clientes na hora (na vitrine e na finalização da compra). <strong>Só participam compras feitas enquanto o sorteio estiver ativo</strong> — a partir do momento da criação até você sortear. Compra de antes ou de depois <strong>não entra</strong>. Cada compra entregue vale 1 chance (quem compra mais, tem mais chance). Ao sortear, o ganhador recebe o vale automaticamente e você é avisado no Telegram.</p>
           <div id="sorAtivo"></div>
           <form id="formSorteio">
             <div class="grid-2">
@@ -638,29 +645,19 @@
                 <input type="text" id="sorPremio" maxlength="120" placeholder="Ex.: 1 Combo Guri Bão grátis">
               </label>
             </div>
-            <div class="grid-3">
-              <label>Período das compras
-                <select id="sorPeriodo">
-                  <option value="mes">Este mês</option>
-                  <option value="mes_passado">Mês passado</option>
-                  <option value="30dias">Últimos 30 dias</option>
-                  <option value="tudo">Desde o início</option>
-                  <option value="custom">Datas à minha escolha</option>
-                </select>
-              </label>
-              <label id="sorIniWrap" class="hidden">De
-                <input type="date" id="sorIni">
-              </label>
-              <label id="sorFimWrap" class="hidden">Até
-                <input type="date" id="sorFim">
-              </label>
-            </div>
-            <p class="dica" id="sorPreview">Conferindo quem participa…</p>
+            <p class="dica">O sorteio começa a valer <strong>no momento em que você criar</strong> e termina quando você sortear o ganhador ou encerrar a divulgação.</p>
             <div class="form-actions">
               <button type="submit" class="btn btn-primary" id="btnSortear">Criar sorteio e divulgar</button>
             </div>
           </form>
-          <div id="sorHistorico"></div>
+          </div>
+        </div>
+
+        <div class="bloco bloco-exp" data-exp="sorfeitos">
+          <div class="bloco-head"><h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Sorteios já feitos</h3></div>
+          <div class="bloco-corpo">
+          <div id="sorHistorico"><p class="dica">Nenhum sorteio feito ainda.</p></div>
+          </div>
         </div>
 
         <div class="bloco">

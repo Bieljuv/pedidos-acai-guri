@@ -1741,7 +1741,6 @@ async function carregarFidelidade() {
     : '<p class="dica">Nenhuma compra entregue ainda.</p>';
   renderSorAtivo(r.sorteios || []);
   renderSorHistorico(r.sorteios || []);
-  sorAtualizarPreview();
   carregarCupons();
   carregarRecuperador();
 }
@@ -1971,47 +1970,29 @@ $('#btnPush').addEventListener('click', async () => {
   }
 });
 
-// ---------------- Sorteio de promoções (v1.9.18) ----------------
-function sorFmtData(d) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-function sorPeriodoDatas() {
-  const tipo = $('#sorPeriodo').value;
-  const hoje = new Date();
-  if (tipo === 'tudo') return { ini: '', fim: '' };
-  if (tipo === 'custom') return { ini: $('#sorIni').value || '', fim: $('#sorFim').value || '' };
-  if (tipo === 'mes') return { ini: sorFmtData(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), fim: sorFmtData(hoje) };
-  if (tipo === 'mes_passado') {
-    return {
-      ini: sorFmtData(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)),
-      fim: sorFmtData(new Date(hoje.getFullYear(), hoje.getMonth(), 0)),
-    };
-  }
-  const ini = new Date(hoje); ini.setDate(ini.getDate() - 29);
-  return { ini: sorFmtData(ini), fim: sorFmtData(hoje) };
-}
-async function sorAtualizarPreview() {
-  const { ini, fim } = sorPeriodoDatas();
-  const qs = new URLSearchParams();
-  if (ini) qs.set('ini', ini);
-  if (fim) qs.set('fim', fim);
-  try {
-    const r = await api('/api/painel/fidelidade/sorteio/participantes' + (qs.toString() ? '?' + qs : ''));
-    $('#sorPreview').textContent = r.clientes
-      ? `${r.clientes} cliente(s) já participam · ${r.chances} chance(s) no total (e quem comprar no período entra também).`
-      : 'Ainda ninguém com compra entregue neste período — sem problema: quem comprar enquanto o sorteio estiver divulgado entra automaticamente.';
-  } catch { $('#sorPreview').textContent = 'Não consegui conferir os participantes agora.'; }
-}
-$('#sorPeriodo').addEventListener('change', () => {
-  const custom = $('#sorPeriodo').value === 'custom';
-  $('#sorIniWrap').classList.toggle('hidden', !custom);
-  $('#sorFimWrap').classList.toggle('hidden', !custom);
-  sorAtualizarPreview();
+/* Caixas expansiveis da Fidelidade (v1.16.11 — pedido do Gabriel:
+   tela mais limpa e organizada). Clicar na cabeca abre/fecha; a
+   escolha fica salva no aparelho. Padrao: so o Sorteio aberto. */
+document.querySelectorAll('.bloco-exp').forEach((bloco) => {
+  const head = bloco.querySelector('.bloco-head');
+  if (!head) return;
+  const seta = document.createElement('span');
+  seta.className = 'exp-seta';
+  seta.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  head.appendChild(seta);
+  const chave = 'fid_exp_' + (bloco.dataset.exp || '');
+  let salvo = null;
+  try { salvo = localStorage.getItem(chave); } catch { /* sem storage */ }
+  const aberto = salvo !== null ? salvo === '1' : bloco.dataset.exp === 'sorteio';
+  bloco.classList.toggle('aberto', aberto);
+  head.addEventListener('click', () => {
+    const vai = !bloco.classList.contains('aberto');
+    bloco.classList.toggle('aberto', vai);
+    try { localStorage.setItem(chave, vai ? '1' : '0'); } catch { /* ok */ }
+  });
 });
-$('#sorIni').addEventListener('change', sorAtualizarPreview);
-$('#sorFim').addEventListener('change', sorAtualizarPreview);
 
+// ---------------- Sorteio de promoções (v1.9.18) ----------------
 /* Sorteio ATIVO (v1.16.9): enquanto existe um sorteio criado e sendo
    divulgado, o formulario some e o bloco do ativo aparece com os dois
    botoes que importam: sortear o ganhador ou encerrar a divulgacao. */
@@ -2021,13 +2002,11 @@ function renderSorAtivo(lista) {
   const ativo = (lista || []).find(s => s.status === 'ativo');
   if (!ativo) { el.innerHTML = ''; form.classList.remove('hidden'); return; }
   form.classList.add('hidden');
-  const periodo = ativo.periodo_ini || ativo.periodo_fim
-    ? `${ativo.periodo_ini ? fidDataFmt(ativo.periodo_ini) : 'desde o início'} até ${ativo.periodo_fim ? fidDataFmt(ativo.periodo_fim) : 'hoje'}`
-    : 'desde o início';
+  const periodo = `valendo desde ${fidDataFmt(ativo.criado_em)} — só contam compras feitas com o sorteio ativo`;
   el.innerHTML = `<div class="sor-ativo-box">
     <p class="sor-ativo-tit">Sorteio sendo divulgado pros clientes agora</p>
     <p class="sor-ativo-nome"><strong>${esc(ativo.titulo)}</strong> — prêmio: <strong>${esc(ativo.premio_texto)}</strong></p>
-    <p class="dica">Período das compras: ${periodo} · <span id="sorAtivoParts">conferindo participantes…</span></p>
+    <p class="dica">Período: ${periodo} · <span id="sorAtivoParts">conferindo participantes…</span></p>
     <div class="form-actions">
       <button type="button" class="btn btn-primary" id="btnSorSortear">Sortear o ganhador agora</button>
       <button type="button" class="btn btn-ghost" id="btnSorEncerrar">Encerrar divulgação</button>
@@ -2035,14 +2014,11 @@ function renderSorAtivo(lista) {
   </div>`;
   (async () => {
     try {
-      const qs = new URLSearchParams();
-      if (ativo.periodo_ini) qs.set('ini', ativo.periodo_ini);
-      if (ativo.periodo_fim) qs.set('fim', ativo.periodo_fim);
-      const r = await api('/api/painel/fidelidade/sorteio/participantes' + (qs.toString() ? '?' + qs : ''));
+      const r = await api('/api/painel/fidelidade/sorteio/participantes?sorteio_id=' + ativo.id);
       const alvo = $('#sorAtivoParts');
       if (alvo) alvo.textContent = r.clientes
         ? `${r.clientes} cliente(s) participando · ${r.chances} chance(s) no total.`
-        : 'ainda nenhum participante — quem comprar entregue no período entra.';
+        : 'ainda nenhum participante — quem comprar e receber a partir de agora entra.';
     } catch { /* o bloco segue sem a contagem */ }
   })();
   $('#btnSorSortear').addEventListener('click', async () => {
@@ -2067,9 +2043,8 @@ function renderSorAtivo(lista) {
 function renderSorHistorico(lista) {
   const el = $('#sorHistorico');
   const feitos = (lista || []).filter(s => s.status !== 'ativo');
-  if (!feitos.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<h4 style="margin:.9rem 0 .4rem">Sorteios já feitos</h4>
-    <table class="simple-table"><thead><tr><th>Data</th><th>Sorteio</th><th>Prêmio</th><th>Participantes</th><th>Ganhador(a)</th><th></th></tr></thead>
+  if (!feitos.length) { el.innerHTML = '<p class="dica">Nenhum sorteio feito ainda.</p>'; return; }
+  el.innerHTML = `<table class="simple-table"><thead><tr><th>Data</th><th>Sorteio</th><th>Prêmio</th><th>Participantes</th><th>Ganhador(a)</th><th></th></tr></thead>
     <tbody>${feitos.map(s => {
       if (s.status === 'encerrado' || !s.ganhador_whatsapp) {
         return `<tr>
@@ -2099,10 +2074,9 @@ $('#formSorteio').addEventListener('submit', async (e) => {
   if (!titulo) { toast('Dê um título ao sorteio.', true); return; }
   if (!premio) { toast('Escreva o prêmio do sorteio.', true); return; }
   if (!confirm(`Criar "${titulo}" e divulgar pros clientes agora? Ele aparece na vitrine e na finalização da compra até você sortear ou encerrar.`)) return;
-  const { ini, fim } = sorPeriodoDatas();
   $('#btnSortear').disabled = true;
   try {
-    await api('/api/painel/fidelidade/sorteios', { method: 'POST', body: { titulo, premio_texto: premio, ini: ini || null, fim: fim || null } });
+    await api('/api/painel/fidelidade/sorteios', { method: 'POST', body: { titulo, premio_texto: premio } });
     toast('Sorteio criado! Ele já está sendo anunciado pros clientes na loja.');
     carregarFidelidade();
   } catch (err) {

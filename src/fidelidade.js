@@ -298,18 +298,39 @@ async function sorteioAtivo() {
   return get(`SELECT * FROM sorteios WHERE loja_id=1 AND status='ativo' ORDER BY id DESC LIMIT 1`);
 }
 
-async function criarSorteio({ titulo, premio_texto, ini, fim }) {
+async function sorteioPorId(id) {
+  return get(`SELECT * FROM sorteios WHERE loja_id=1 AND id=?`, id);
+}
+
+async function criarSorteio({ titulo, premio_texto }) {
   const tit = String(titulo || '').trim().slice(0, 80);
   const premio = String(premio_texto || '').trim().slice(0, 120);
   if (!tit) return { ok: false, erro: 'Dê um título ao sorteio (ex.: Sorteio de Aniversário).' };
   if (!premio) return { ok: false, erro: 'Escreva o prêmio (ex.: 1 Combo Guri Bão grátis).' };
   const ativo = await sorteioAtivo();
   if (ativo) return { ok: false, erro: `Já existe um sorteio sendo divulgado ("${ativo.titulo}"). Sorteie ou encerre ele primeiro.` };
+  // Sem periodo escolhido (regra do Gabriel, v1.16.11): o periodo do
+  // sorteio e' a propria vida dele — da criacao (criado_em) ate o
+  // sorteio/encerramento. So contam compras feitas nesse intervalo.
   const info = await run(`INSERT INTO sorteios (loja_id, titulo, premio_texto, periodo_ini, periodo_fim, status)
-    VALUES (1, ?, ?, ?, ?, 'ativo')`,
-    tit, premio, ini || null, fim || null);
+    VALUES (1, ?, ?, NULL, NULL, 'ativo')`,
+    tit, premio);
   const id = Number(info && info.lastInsertRowid) || null;
   return { ok: true, sorteio: await get(`SELECT * FROM sorteios WHERE loja_id=1 AND id=?`, id) };
+}
+
+/* Participantes PELA REGRA DO SORTEIO ATIVO (v1.16.11): so compras
+   CRIADAS a partir do momento em que o sorteio foi criado (criado_em
+   da linha) e ja ENTREGUES. Compra de antes — mesmo entregue durante
+   o sorteio — NAO entra; a comparacao e' feita no banco, entre as
+   duas colunas de data, pra valer igual nos dois bancos. */
+async function participantesDoSorteio(s) {
+  return all(`SELECT p.cliente_whatsapp AS whatsapp, COALESCE(c.nome, MAX(p.cliente_nome)) AS nome,
+      COUNT(*) AS compras
+    FROM pedidos p LEFT JOIN clientes c ON c.loja_id=1 AND c.whatsapp = p.cliente_whatsapp
+    WHERE p.loja_id=1 AND p.status='ENTREGUE'
+      AND p.created_at >= (SELECT criado_em FROM sorteios WHERE id=?)
+    GROUP BY p.cliente_whatsapp, c.nome ORDER BY compras DESC, nome`, s.id);
 }
 
 async function encerrarSorteio(id) {
@@ -326,8 +347,8 @@ async function sortearAgora(id) {
   if (s.status !== 'ativo') return { ok: false, erro: 'Este sorteio já foi encerrado.' };
   const tit = s.titulo;
   const premio = s.premio_texto;
-  const parts = await participantes(s.periodo_ini || null, s.periodo_fim || null);
-  if (!parts.length) return { ok: false, erro: 'Nenhum cliente com compra entregue neste período. Escolha um período maior.' };
+  const parts = await participantesDoSorteio(s);
+  if (!parts.length) return { ok: false, erro: 'Ainda ninguém comprou com o sorteio ativo. Espere entrarem compras entregues desde a criação dele.' };
   const totalChances = parts.reduce((soma, p) => soma + Number(p.compras), 0);
   let sorteado = randomInt(0, totalChances);
   let ganhador = parts[0];
@@ -368,5 +389,5 @@ module.exports = {
   premioResgatavel, consumirPremio, aoTransicionar,
   listarPremios, ranking, resgatarManual, removerPremio, TEXTO_ENTREGA_GRATIS,
   participantes, sortear, listarSorteios, concederPremioAvulso,
-  sorteioAtivo, criarSorteio, encerrarSorteio, sortearAgora,
+  sorteioAtivo, sorteioPorId, criarSorteio, encerrarSorteio, sortearAgora, participantesDoSorteio,
 };

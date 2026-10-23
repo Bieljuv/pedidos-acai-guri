@@ -57,7 +57,8 @@ h3.view-h{margin-bottom:.4rem}
 .brand img{width:178px;max-width:100%;height:auto;border-radius:14px;object-fit:contain}
 .brand-nome{font-weight:800;font-size:1rem;line-height:1.1}
 .brand-sub{font-size:.75rem;opacity:.75}
-.menu{padding:1rem .7rem;display:flex;flex-direction:column;gap:5px;overflow-y:auto}
+.menu{padding:1rem .7rem;display:flex;flex-direction:column;gap:5px;overflow-y:auto;flex:1 1 auto;min-height:0;scrollbar-width:none}
+.menu::-webkit-scrollbar{display:none}
 .menu-item{background:transparent;border:none;color:#f3e4f8;text-align:left;padding:.78rem .8rem;border-radius:10px;font-size:.95rem;font-weight:600;display:flex;align-items:center;gap:.6rem;width:100%}
 .menu-item:hover{background:rgba(255,255,255,.1)}
 .menu-item.active{background:var(--primary);color:#fff}
@@ -496,7 +497,8 @@ tr.ponto-aberto td{background:#fdf3d8}
 .side-topo{display:none}
 @media (min-width:861px){
   .sidebar{overflow:hidden;clip-path:inset(0);transition:width .28s ease}
-  .sidebar .brand,.sidebar .menu,.sidebar .side-footer{width:268px;flex:none}
+  .sidebar .brand,.sidebar .side-footer{width:268px;flex:none}
+  .sidebar .menu{width:268px}
   .side-topo{display:block;width:268px;flex:none;padding:.75rem .7rem 0}
   .btn-menu-lateral{display:flex;flex-direction:column;justify-content:center;gap:5px;width:42px;height:42px;padding:0 .8rem;background:transparent;border:0;border-radius:10px;cursor:pointer}
   .btn-menu-lateral span{display:block;width:18px;height:2px;border-radius:2px;background:#f3e4f8}

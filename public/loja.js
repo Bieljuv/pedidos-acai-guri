@@ -113,7 +113,34 @@ $('#btn-pdn-buscar').addEventListener('click', () => {
   $('#btn-pdn-buscar').hidden = true;
   $('#pdn-fone').focus();
 });
-$('#pdn-fone').addEventListener('input', (e) => { e.target.value = mascararFone(e.target.value); });
+/* Mascara de telefone que APAGA direito (v1.15.3): a versao antiga so
+   reformatava o texto — ao apagar por cima do traco/parentese, a mascara
+   devolvia o separador e o campo parecia TRAVADO (reclamacao do Gabriel).
+   Aqui o cursor e controlado por DIGITO: apagar um separador apaga o
+   digito vizinho, e cada toque no apagar tira exatamente um digito. */
+function mascaraFoneInput(e) {
+  const el = e.target;
+  const bruto = el.value;
+  const cursor = el.selectionStart || 0;
+  const antesDoCursor = soDigitos(bruto.slice(0, cursor)).length;
+  let digitos = soDigitos(bruto).slice(0, 11);
+  let alvo = antesDoCursor;
+  const anterior = Number(el.dataset.digitos || 0);
+  if ((e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward') && digitos.length === anterior && digitos.length > 0) {
+    const idx = e.inputType === 'deleteContentBackward' ? antesDoCursor - 1 : antesDoCursor;
+    if (idx >= 0 && idx < digitos.length) {
+      digitos = digitos.slice(0, idx) + digitos.slice(idx + 1);
+      alvo = idx;
+    }
+  }
+  el.dataset.digitos = digitos.length;
+  const novo = mascararFone(digitos);
+  el.value = novo;
+  let pos = 0, cont = 0;
+  while (pos < novo.length && cont < alvo) { if (/\d/.test(novo[pos])) cont++; pos++; }
+  try { el.setSelectionRange(pos, pos); } catch {}
+}
+$('#pdn-fone').addEventListener('input', mascaraFoneInput);
 $('#pdn-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const digitos = soDigitos($('#pdn-fone').value);
@@ -743,7 +770,7 @@ function mascararFone(v) {
   if (d.length > 0) return `(${d}`;
   return '';
 }
-$('#ck-whats').addEventListener('input', (e) => { e.target.value = mascararFone(e.target.value); });
+$('#ck-whats').addEventListener('input', mascaraFoneInput);
 /* Fidelidade (v1.9.17): ao terminar de digitar o WhatsApp, o sistema
    reconhece o cliente que voltou e mostra a novidade já no checkout. */
 $('#ck-whats').addEventListener('change', async (e) => {
@@ -912,7 +939,7 @@ function abrirCheckout() {
   let salvo = {};
   try { salvo = JSON.parse(localStorage.getItem('guri_cliente') || '{}'); } catch {}
   if (salvo.nome) $('#ck-nome').value = salvo.nome;
-  if (salvo.whatsapp) $('#ck-whats').value = mascararFone(salvo.whatsapp);
+  if (salvo.whatsapp) { const w = $('#ck-whats'); w.value = mascararFone(salvo.whatsapp); w.dataset.digitos = soDigitos(salvo.whatsapp).length; }
   if (salvo.rua) $('#ck-rua').value = salvo.rua;
   if (salvo.numero) $('#ck-numero').value = salvo.numero;
   if (salvo.complemento) $('#ck-complemento').value = salvo.complemento;

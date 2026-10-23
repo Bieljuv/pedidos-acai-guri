@@ -251,6 +251,7 @@ const TITULOS = {
   'rec-presencial': 'Meios de Recebimento — Presencial', 'rec-mp': 'Meios de Recebimento — Mercado Pago',
   'rec-asaas': 'Meios de Recebimento — Asaas', loja: 'Loja e Aparência', relatorio: 'Relatório do Dia',
   contabil: 'Contábil', financeiro: 'Financeiro', fidelidade: 'Fidelidade', configuracoes: 'Configurações', equipe: 'Equipe',
+  'primeiros-passos': 'Primeiros Passos',
 };
 function irPara(view) {
   state.view = view;
@@ -271,6 +272,7 @@ function irPara(view) {
   if (view === 'fidelidade') carregarFidelidade();
   if (view === 'configuracoes') carregarConfiguracoes();
   if (view === 'equipe') { carregarEquipe(); carregarPontoRelatorio(); carregarRecuperacao(); }
+  if (view === 'primeiros-passos') carregarPassos();
 }
 $$('.menu-item[data-view]').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.view.startsWith('rec-')) { $('#accReceb').classList.add('open'); $('#accRecebBtn').setAttribute('aria-expanded', 'true'); }
@@ -329,16 +331,37 @@ $('#btnReabrir').addEventListener('click', async () => {
   catch (err) { toast(err.message, true); }
 });
 
-async function carregarSaude() {
-  try {
-    const s = await api('/api/painel/saude');
-    const wa = s.whatsapp && s.whatsapp.configurado;
-    const tg = s.telegram && s.telegram.configurado;
-    $('#saudeBox').innerHTML =
-      `<span class="pill ${wa ? 'on' : 'sim'}">WhatsApp: ${wa ? 'conectado' : 'modo simulado'}</span>` +
-      `<span class="pill ${tg ? 'on' : 'sim'}">Telegram: ${tg ? 'conectado' : 'modo simulado'}</span>` +
-      `<span class="pill ${s.banco === 'ok' ? 'on' : 'sim'}">Sistema: ${s.banco === 'ok' ? 'ok' : esc(s.banco || '—')}</span>`;
-  } catch { $('#saudeBox').innerHTML = '<span class="pill sim">Saúde: indisponível</span>'; }
+/* ---------- Configurações em caixas expansíveis (v1.11.1) ----------
+   Os conectores (WhatsApp, Telegram, 99) e o backup viram acordeões:
+   a página abre curta, com o status visível no cabeçalho de cada
+   caixa, e o formulário só aparece quando o dono abre a caixa. */
+function initAcordeoesConfig() {
+  const forms = ['formCfgWhats', 'formCfgTelegram', 'formCfg99', 'formCfgIfood', 'formCfgBackup'];
+  forms.forEach((id, idx) => {
+    const form = document.getElementById(id);
+    if (!form || form.dataset.acc) return;
+    form.dataset.acc = '1';
+    form.classList.add('acc-form');
+    const head = form.firstElementChild;
+    if (!head) return;
+    head.classList.add('acc-head');
+    const seta = document.createElement('span');
+    seta.className = 'acc-seta';
+    seta.innerHTML = '<svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-right"></use></svg>';
+    head.appendChild(seta);
+    const body = document.createElement('div');
+    body.className = 'acc-body';
+    while (form.children.length > 1) body.appendChild(form.children[1]);
+    form.appendChild(body);
+    // Cada configuração é a SUA seção: todas nascem fechadas e abrir
+    // uma fecha as outras — a página nunca vira uma lista extensa.
+    form.classList.add('fechado');
+    head.addEventListener('click', () => {
+      const abrir = form.classList.contains('fechado');
+      document.querySelectorAll('.acc-form').forEach((f) => f.classList.add('fechado'));
+      if (abrir) form.classList.remove('fechado');
+    });
+  });
 }
 
 /* ---------- Tempo real (SSE + fallback polling) ---------- */
@@ -504,6 +527,7 @@ function renderBoard() {
           <div class="pcard-cliente">${esc(p.cliente_nome || 'Cliente')}</div>
           <div class="pcard-itens">${esc(resumoItens(p))}</div>
           ${p.codigo_entrega && ativo ? `<div class="pcard-pin">${ic('chave')} PIN ${esc(p.codigo_entrega)}</div>` : ''}
+          ${p.origem === 'ifood' ? '<div class="pcard-ifood">iFood</div>' : ''}
           <div class="pcard-bottom"><span class="pcard-total">${fmtBRL(p.total_centavos)}</span><span class="selos">${selosPedido(p)}</span></div>
         </article>`;
       }).join('') || '<div class="dica" style="text-align:center;padding:.6rem">—</div>') + '</div>';
@@ -1289,6 +1313,9 @@ $('#btnTestarAsaas').addEventListener('click', () => testarProvedor('asaas', $('
 function preencherLoja() {
   const l = state.loja;
   if (!l) { carregarLoja().then(preencherLoja); return; }
+  $('#temaPrimaria').value = l.cor_primaria || '#7E047D';
+  $('#temaDestaque').value = l.cor_destaque || '#DB04E2';
+  temaPreviaAtualizar();
   $('#lojaNome').value = l.nome || '';
   $('#lojaWhatsapp').value = l.whatsapp || '';
   $('#lojaInstagram').value = l.instagram || '';
@@ -1337,15 +1364,119 @@ $('#formLoja').addEventListener('submit', async (e) => {
     horario_fecha: $('#lojaFecha').value || null,
     aberta_manual: $('#lojaAbertaManual').checked,
     som_pedido: $('#lojaSom').value,
+    cor_primaria: $('#temaPrimaria').value,
+    cor_destaque: $('#temaDestaque').value,
     logo_url: $('#lojaLogoUrl').value || null,
     capa_url: $('#lojaCapaUrl').value || null,
   };
   try {
     await api('/api/painel/loja', { method: 'PATCH', body: payload });
     toast('Loja salva.');
+    const lk = $('#temaCss'); if (lk) lk.href = '/tema.css?v=' + Date.now();
     carregarLoja();
   } catch (err) { toast(err.message, true); }
 });
+
+/* ================= PRIMEIROS PASSOS (v1.9.30) ================= */
+let passosAtuais = [];
+async function confirmarPasso(chave) {
+  try {
+    await api('/api/painel/primeiros-passos/confirmar', { method: 'POST', body: { chave } });
+    carregarPassos();
+  } catch (e) { toast(e.message, true); }
+}
+async function carregarPassos() {
+  let p;
+  try { p = await api('/api/painel/primeiros-passos'); } catch { return 0; }
+  passosAtuais = [
+    { feito: p.nome_ok, titulo: 'Dê um nome pra sua loja', desc: 'É o nome que o cliente vê no topo da loja e nas mensagens.', btn: 'Dar nome', view: 'loja' },
+    { feito: p.logo_ok, titulo: 'Envie a logo da sua loja', desc: 'A arte que aparece na loja pública e no aplicativo do painel.', btn: 'Enviar logo', view: 'loja' },
+    { feito: p.tema_ok, titulo: 'Escolha as cores — Tema do sistema', desc: 'A cara da sua marca: escolha um tema pronto ou monte o seu.', btn: 'Escolher cores', view: 'loja' },
+    { feito: p.whatsapp_ok, titulo: 'Cadastre o WhatsApp da loja', desc: 'É por ele que os clientes chamam a sua loja.', btn: 'Cadastrar', view: 'loja' },
+    { feito: p.endereco_ok, titulo: 'Informe o endereço da loja', desc: 'Aparece na loja pública e na comanda impressa.', btn: 'Informar', view: 'loja' },
+    { feito: p.horario_ok, titulo: 'Confira o horário de funcionamento', desc: 'Fora do horário a loja fecha sozinha pros clientes. O padrão inicial é 09:00 às 18:00.', btn: 'Conferir horário', view: 'loja', confirmar: 'horario_ok', confRotulo: 'O horário está certo' },
+    { feito: p.produtos_total > 0, titulo: 'Cadastre seu primeiro produto', desc: 'Crie as categorias e monte o seu cardápio do seu jeito.', btn: 'Cadastrar produto', view: 'cardapio' },
+    { feito: p.entrega_ok, titulo: 'Defina como funciona a entrega', desc: 'Cadastre os bairros e as taxas — ou confirme que a taxa é combinada com cada cliente.', btn: 'Definir entrega', view: 'bairros', confirmar: 'taxa_ok', confRotulo: 'Minha taxa é combinada (a consultar)' },
+    { feito: p.senha_ok, titulo: 'Troque a senha do administrador', desc: 'A senha inicial é a padrão de fábrica — troque antes de começar a vender.', btn: 'Trocar senha', acao: () => { const b = $('#btnTrocarSenha'); if (b) b.click(); } },
+    { feito: p.aberta, titulo: 'Abra sua loja', desc: 'Tudo pronto? Abra pro público e comece a vender.', btn: 'Abrir a loja agora', acao: async () => { try { await api('/api/painel/loja', { method: 'PATCH', body: { aberta_manual: true } }); toast('Loja ABERTA! Bons pedidos.'); carregarLoja(); carregarPassos(); } catch (e) { toast(e.message, true); } } },
+  ];
+  const feitos = passosAtuais.filter((x) => x.feito).length;
+  const cont = $('#passosContagem'); if (cont) cont.textContent = feitos + ' de ' + passosAtuais.length;
+  const fill = $('#passosBarraFill'); if (fill) fill.style.width = Math.round((feitos / passosAtuais.length) * 100) + '%';
+  const badge = $('#badgePassos');
+  if (badge) { badge.textContent = String(passosAtuais.length - feitos); badge.classList.toggle('hidden', feitos === passosAtuais.length); }
+  const pronto = $('#passosPronto'); if (pronto) pronto.classList.toggle('hidden', feitos !== passosAtuais.length);
+  const lista = $('#passosLista');
+  if (lista) {
+    lista.innerHTML = passosAtuais.map((x, i) => `
+      <div class="passo ${x.feito ? 'feito' : ''}">
+        <span class="p-ic">${x.feito ? '<svg class="ic" aria-hidden="true" focusable="false"><use href="#i-check"></use></svg>' : (i + 1)}</span>
+        <div class="p-txt"><strong>${esc(x.titulo)}</strong><p>${esc(x.desc)}</p></div>
+        <div class="p-acoes">
+          ${x.feito ? '<span class="pill ok">Feito</span>' : `<button type="button" class="btn btn-primary btn-sm" data-passo="${i}">${esc(x.btn)}</button>`}
+          ${!x.feito && x.confirmar ? `<button type="button" class="btn btn-ghost btn-sm" data-conf="${esc(x.confirmar)}">${esc(x.confRotulo)}</button>` : ''}
+        </div>
+      </div>`).join('');
+    lista.querySelectorAll('[data-passo]').forEach((b) => b.addEventListener('click', () => {
+      const x = passosAtuais[Number(b.dataset.passo)];
+      if (!x) return;
+      if (x.acao) x.acao(); else if (x.view) irPara(x.view);
+    }));
+    lista.querySelectorAll('[data-conf]').forEach((b) => b.addEventListener('click', () => confirmarPasso(b.dataset.conf)));
+  }
+  return feitos;
+}
+$('#btnPassosOcultar') && $('#btnPassosOcultar').addEventListener('click', () => confirmarPasso('ocultar'));
+$('#btnPassosOcultar2') && $('#btnPassosOcultar2').addEventListener('click', () => { confirmarPasso('ocultar'); toast('Certo — a tela não abre mais sozinha. Ela fica no menu Primeiros Passos.'); });
+
+/* ================= TEMA DO SISTEMA (v1.9.29) ================= */
+const TEMA_PRESETS = [
+  { nome: 'Roxo Açaí', primaria: '#7E047D', destaque: '#DB04E2' },
+  { nome: 'Verde Folha', primaria: '#1E7A34', destaque: '#7AC74F' },
+  { nome: 'Azul Confiança', primaria: '#1450A0', destaque: '#38B6E3' },
+  { nome: 'Vermelho Sabor', primaria: '#B01E24', destaque: '#FF7A59' },
+  { nome: 'Laranja Energia', primaria: '#D96C00', destaque: '#FFC53D' },
+  { nome: 'Rosa Doce', primaria: '#C2438F', destaque: '#FF8FBF' },
+  { nome: 'Marrom Café', primaria: '#6B4226', destaque: '#D9A441' },
+  { nome: 'Preto Premium', primaria: '#232323', destaque: '#C9A227' },
+];
+function temaMistura(hex, alvo, peso) {
+  const p = (x) => parseInt(x, 16);
+  const c1 = [p(hex.slice(1, 3)), p(hex.slice(3, 5)), p(hex.slice(5, 7))];
+  const c2 = [p(alvo.slice(1, 3)), p(alvo.slice(3, 5)), p(alvo.slice(5, 7))];
+  const m = c1.map((v, i) => Math.round(v + (c2[i] - v) * peso));
+  return '#' + m.map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+function temaPreviaAtualizar() {
+  const p = $('#temaPrimaria').value || '#7E047D';
+  const pv = $('#temaPrevia');
+  if (pv) {
+    pv.style.setProperty('--primary', p);
+    pv.style.setProperty('--deep', temaMistura(p, '#000000', 0.38));
+    pv.style.setProperty('--bg', temaMistura(p, '#FFFFFF', 0.96));
+  }
+  document.querySelectorAll('.tema-chip').forEach((ch) => {
+    ch.classList.toggle('sel', ch.dataset.primaria === p && ch.dataset.destaque === ($('#temaDestaque').value || ''));
+  });
+}
+(function montarTema() {
+  const box = $('#temaPresets');
+  if (!box) return;
+  box.innerHTML = TEMA_PRESETS.map((t) =>
+    `<button type="button" class="tema-chip" data-primaria="${t.primaria}" data-destaque="${t.destaque}"><span class="bolas"><span class="bola" style="background:${t.primaria}"></span><span class="bola" style="background:${t.destaque}"></span></span>${t.nome}</button>`).join('');
+  box.querySelectorAll('.tema-chip').forEach((ch) => ch.addEventListener('click', () => {
+    $('#temaPrimaria').value = ch.dataset.primaria;
+    $('#temaDestaque').value = ch.dataset.destaque;
+    temaPreviaAtualizar();
+  }));
+  $('#temaPrimaria').addEventListener('input', temaPreviaAtualizar);
+  $('#temaDestaque').addEventListener('input', temaPreviaAtualizar);
+  $('#btnTemaPadrao').addEventListener('click', () => {
+    $('#temaPrimaria').value = '#7E047D';
+    $('#temaDestaque').value = '#DB04E2';
+    temaPreviaAtualizar();
+  });
+})();
 
 /* ================= RELATÓRIO ================= */
 function hojeLocal() {
@@ -2077,6 +2208,7 @@ async function carregarConfiguracoes() {
     preencherConfiguracoes(c);
   } catch (err) { toast(err.message, true); }
   carregarCfg99(); // silencioso se falhar (a tela principal não depende dele)
+  carregarCfgIfood();
 }
 /* Mostrar / ocultar os campos de segredo (chave de API e token) */
 $$('[data-mostrar]').forEach(b => b.addEventListener('click', () => {
@@ -2098,7 +2230,7 @@ async function salvarCfgWhats() {
   if (chave) payload.evolution_apikey = chave; // em branco = mantém a chave salva
   const c = await api('/api/painel/configuracoes', { method: 'PUT', body: payload });
   preencherConfiguracoes(c);
-  carregarSaude();
+  
   return c;
 }
 $('#formCfgWhats').addEventListener('submit', async (e) => {
@@ -2114,7 +2246,7 @@ $('#btnCfgWhatsTestar').addEventListener('click', async () => {
     await salvarCfgWhats();
     const data = await api('/api/painel/configuracoes/testar-whatsapp', { method: 'POST', body: {} });
     cfgResultado(res, !!data.ok, data.mensagem);
-    if (data.ok) { toast('Conexão com o WhatsApp confirmada.'); carregarSaude(); }
+    if (data.ok) { toast('Conexão com o WhatsApp confirmada.');  }
   } catch (err) { cfgResultado(res, false, err.message); }
 });
 /* Teste REAL do WhatsApp (v1.9): manda uma mensagem de verdade pro número
@@ -2190,6 +2322,55 @@ $('#formCfg99').addEventListener('submit', async (e) => {
     toast(c.configurado ? 'Entregador 99 salvo e ativo.' : 'Entregador 99 salvo — confira o ativo e as credenciais pra liberar a chamada automática.');
   } catch (err) { toast(err.message, true); }
 });
+
+/* ----- iFood (v1.11.3 — config_ifood) ----- */
+function preencherCfgIfood(c) {
+  if (!c) return;
+  const pill = $('#cfgIfoodPill');
+  pill.textContent = c.configurado ? (c.ativo ? 'Configurado' : 'Configurado (desligado)') : (c.ativo ? 'Faltam credenciais' : 'Desligado');
+  pill.className = 'cfg-pill ' + (c.configurado && c.ativo ? 'on' : 'sim');
+  $('#cfgIfoodAtivo').checked = !!c.ativo;
+  $('#cfgIfoodClientId').value = c.client_id || '';
+  const sec = $('#cfgIfoodClientSecret');
+  sec.value = '';
+  sec.type = 'password';
+  sec.placeholder = c.client_secret_configurado ? `Salvo (${c.client_secret_mascarado || '••••'}) — deixe em branco para manter` : 'Cole o Client Secret aqui';
+  $('#cfgIfoodLimparSecret').checked = false;
+  $('#cfgIfoodMerchantId').value = c.merchant_id || '';
+  const st = $('#cfgIfoodStats');
+  if (st) st.textContent = c.total_importados
+    ? `Já entraram ${c.total_importados} pedido(s) do iFood por aqui.` + (c.ultima_poll ? ` Última verificação: ${String(c.ultima_poll).slice(0, 16).replace('T', ' ')}.` : '')
+    : 'Nenhum pedido do iFood entrou ainda. Com a integração ativa, o sistema verifica sozinho a cada 30 segundos.';
+}
+async function carregarCfgIfood() {
+  try { preencherCfgIfood(await api('/api/painel/ifood/config')); } catch { /* silencioso */ }
+}
+$('#btnIfoodVerificar').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/painel/ifood/verificar', { method: 'POST', body: {} });
+    if (!r.ok) { toast(r.motivo || 'A integração está desligada.', true); return; }
+    toast(r.importados ? `${r.importados} pedido(s) novo(s) do iFood entraram!` : 'Verificação feita: nenhum pedido novo no iFood.');
+    carregarCfgIfood();
+    carregarPedidos();
+  } catch (err) { toast(err.message, true); }
+});
+$('#formCfgIfood').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const r = await api('/api/painel/ifood/config', {
+      method: 'PUT',
+      body: {
+        ativo: $('#cfgIfoodAtivo').checked,
+        client_id: $('#cfgIfoodClientId').value.trim(),
+        client_secret: $('#cfgIfoodClientSecret').value,
+        merchant_id: $('#cfgIfoodMerchantId').value.trim(),
+        limpar_secret: $('#cfgIfoodLimparSecret').checked,
+      },
+    });
+    preencherCfgIfood(r);
+    toast('Configuração do iFood salva.');
+  } catch (err) { toast(err.message, true); }
+});
 $('#btnCfg99Testar').addEventListener('click', async () => {
   const res = $('#cfg99Result');
   res.classList.remove('hidden');
@@ -2210,7 +2391,7 @@ async function salvarCfgTelegram() {
   if (token) payload.telegram_bot_token = token; // em branco = mantém o token salvo
   const c = await api('/api/painel/configuracoes', { method: 'PUT', body: payload });
   preencherConfiguracoes(c);
-  carregarSaude();
+  
   return c;
 }
 $('#formCfgTelegram').addEventListener('submit', async (e) => {
@@ -2311,7 +2492,7 @@ $('#btnCfgTgTestar').addEventListener('click', async () => {
       mensagem = (mensagem ? mensagem + ' ' : '') + `Bot: ${bot}.`;
     }
     cfgResultado(res, !!data.ok, mensagem);
-    if (data.ok) { toast('Teste enviado pro seu Telegram.'); carregarSaude(); }
+    if (data.ok) { toast('Teste enviado pro seu Telegram.');  }
   } catch (err) { cfgResultado(res, false, err.message); }
 });
 
@@ -2327,12 +2508,47 @@ async function carregarPonto() {
   // seco deixava o cartão do funcionário anterior desenhado na tela do
   // admin, parecendo que o admin tinha batido ponto).
   if (!state.user || state.user.perfil !== 'funcionario') { state.ponto = null; renderPonto(); return; }
-  try {
-    state.ponto = await api('/api/painel/ponto/hoje');
-    renderPonto();
-    verificarAlertaSaida();
-  } catch { /* silencioso: o cartão só não atualiza */ }
+  // v1.11.0: funcionário não bate mais ponto — quem manda é a trava
+  // TRABALHANDO (carregarTrabalho). O cartão some e o histórico antigo
+  // continua visível pro admin em Equipe.
+  state.ponto = null;
+  renderPonto();
 }
+/* ---------- Trava Trabalhando (v1.11.0) ---------- */
+function horaDe(iso) {
+  if (!iso) return '';
+  const d = new Date(String(iso).replace(' ', 'T'));
+  return isNaN(d) ? '' : d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+function aplicarTrava(on, desde) {
+  state.trabalhando = !!on;
+  const card = $('#travaCard');
+  if (!card) return;
+  card.classList.remove('hidden');
+  card.classList.toggle('on', !!on);
+  $('#view-pedidos').classList.toggle('travado', !on);
+  $('#travaTitulo').textContent = on ? 'Você está trabalhando' : 'Você ainda não está trabalhando';
+  $('#travaSub').textContent = on
+    ? 'Os pedidos estão liberados pra você' + (desde ? ' · desde ' + horaDe(desde) : '') + '.'
+    : 'Toque em TRABALHANDO pra liberar os pedidos. O administrador é avisado quando você começa.';
+  $('#btnTrabalhar').textContent = on ? 'ENCERRAR' : 'TRABALHANDO';
+}
+async function carregarTrabalho() {
+  if (!state.user || state.user.perfil !== 'funcionario') return;
+  try {
+    const r = await api('/api/painel/trabalhando');
+    aplicarTrava(r.trabalhando, r.desde);
+  } catch { /* sem o visual, o servidor continua barrando */ }
+}
+$('#btnTrabalhar').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/painel/trabalhando', { method: 'POST', body: { ativo: !state.trabalhando } });
+    aplicarTrava(r.trabalhando, r.desde);
+    toast(r.trabalhando ? 'Você começou a trabalhar — pedidos liberados!' : 'Turno encerrado.');
+    if (r.trabalhando) carregarPedidos();
+  } catch (e) { toast(e.message || 'Não consegui mudar seu estado.', true); }
+});
+
 function turnoTexto(j) {
   if (!j) return 'Sem jornada definida — o ponto funciona, mas sem alerta de fim de turno.';
   const dias = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
@@ -2653,8 +2869,22 @@ function iniciarApp() {
   }
   // Funcionário não vê os menus de gestão (o servidor barra com 403 também).
   document.body.classList.toggle('perfil-func', !ehAdmin);
-  carregarLoja();
-  carregarSaude();
+  initAcordeoesConfig();
+  if (!ehAdmin) carregarTrabalho();
+  carregarLoja().then(async () => {
+    // O selo do menu reflete os passos que faltam em qualquer instalação.
+    if (!ehAdmin) return;
+    try {
+      const feitos = await carregarPassos();
+      // Instalação nova (loja ainda "Minha Loja"): abre o assistente,
+      // salvo se o dono já dispensou a abertura automática.
+      if (state.loja && state.loja.nome === 'Minha Loja' && feitos < 10) {
+        const p = await api('/api/painel/primeiros-passos');
+        if (!p.ocultar) irPara('primeiros-passos');
+      }
+    } catch { /* silencioso */ }
+  });
+  
   irPara('pedidos');
   conectarStream();
   if (!ehAdmin) iniciarPonto();

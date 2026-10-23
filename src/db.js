@@ -182,6 +182,10 @@ CREATE TABLE IF NOT EXISTS pagamentos (
   ultimo_evento TEXT,
   criado_em TEXT DEFAULT (datetime('now')), atualizado_em TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS trabalho_sessoes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL DEFAULT 1,
+  usuario_id INTEGER NOT NULL, inicio TEXT DEFAULT (datetime('now')), fim TEXT
+);
 `;
 
 // ---------------------------------------------------------------------------
@@ -220,6 +224,14 @@ if (MODO === 'sqlite') {
     'ALTER TABLE pedido_status_historico ADD COLUMN autor TEXT',
     // v1.9.15: CNPJ/CPF da loja (rodapé da loja e comanda).
     'ALTER TABLE lojas ADD COLUMN documento TEXT',
+    // v1.9.29: cores do tema da loja.
+    'ALTER TABLE lojas ADD COLUMN cor_primaria TEXT',
+    'ALTER TABLE lojas ADD COLUMN cor_destaque TEXT',
+    // v1.9.30: marcações do assistente de primeira configuração.
+    'ALTER TABLE lojas ADD COLUMN setup_json TEXT',
+    // iFood (v1.12.0): pedidos ganham origem/externo_id
+    'ALTER TABLE pedidos ADD COLUMN origem TEXT DEFAULT \'proprio\'',
+    'ALTER TABLE pedidos ADD COLUMN externo_id TEXT',
   ]) { try { sq.exec(alt); } catch { /* coluna já existe */ } }
 }
 
@@ -497,6 +509,11 @@ async function init() {
   }
   // v1.9.15: garante a coluna do documento da loja em bancos PG já existentes.
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS documento TEXT');
+  await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cor_primaria TEXT');
+  await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cor_destaque TEXT');
+  await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS setup_json TEXT');
+  await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origem TEXT DEFAULT 'proprio'");
+  await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS externo_id TEXT');
   console.log('[banco] Modo SUPABASE: conectado no Postgres da DATABASE_URL.');
   if (await seed()) console.log('[banco] Postgres vazio — seed inicial aplicado (loja de exemplo + admin/admin123).');
 }

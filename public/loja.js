@@ -48,6 +48,19 @@ function icLoja(nome, cls) {
 
 /* ---------- estado global ---------- */
 let loja = null;
+// Loja fechada/pausada (v1.12.1): TODOS os botões de compra ficam
+// inativos — só Instagram e WhatsApp continuam ativos. O servidor já
+// recusava o pedido no fim; agora a loja nem deixa montar a compra.
+function comprasBloqueadas() { return !!loja && (!loja.aberta || !!loja.pausada); }
+function aplicarTravaCompras() {
+  const off = comprasBloqueadas();
+  document.body.classList.toggle('loja-fechada', off);
+  for (const id of ['barra-carrinho', 'hdr-carrinho', 'btn-ir-checkout']) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = off;
+  }
+  $$('.card-produto').forEach((c) => { if (!c.classList.contains('esgotado')) c.disabled = off; });
+}
 let categorias = [];
 let produtos = [];
 const produtosPorId = new Map();
@@ -252,7 +265,18 @@ function renderLoja() {
         : 'A loja está fechada e não está recebendo pedidos no momento. Você pode olhar o cardápio; volte no horário de funcionamento!');
     banner.hidden = false;
   } else banner.hidden = true;
+  aplicarTravaCompras();
 }
+
+/* Nome do topo surge so ao passar do hero (v1.13.2). */
+(function observarHero() {
+  const hero = document.querySelector('.hero');
+  if (!hero || !('IntersectionObserver' in window)) { document.body.classList.add('rolou'); return; }
+  const obs = new IntersectionObserver((es) => {
+    for (const e of es) document.body.classList.toggle('rolou', !e.isIntersecting);
+  }, { rootMargin: '-64px 0px 0px 0px' });
+  obs.observe(hero);
+})();
 
 /* ---------- cardápio ---------- */
 function produtosDaCategoria(catId) {
@@ -280,7 +304,7 @@ function cardProduto(p) {
   const card = document.createElement('button');
   card.type = 'button';
   card.className = 'card-produto' + (p.esgotado ? ' esgotado' : '');
-  card.disabled = !!p.esgotado;
+  card.disabled = !!p.esgotado || comprasBloqueadas();
   const min = precoMinimo(p);
   const precoHTML = p.tipo === 'montavel'
     ? `<span class="apartir">a partir de</span> ${R$(min)}`
@@ -448,6 +472,8 @@ function alternarOpcao(g, o) {
   atualizarRodapeMontador();
 }
 function atualizarRodapeMontador() {
+  const btnAdd = $('#montador-adicionar');
+  if (btnAdd) btnAdd.disabled = comprasBloqueadas();
   if (!mont) return;
   $('#montador-qtd').textContent = mont.qtd;
   const unit = calcularUnitario(mont.produto, mont.selecionadas);
@@ -457,7 +483,7 @@ function atualizarRodapeMontador() {
 $('#montador-menos').addEventListener('click', () => { if (mont && mont.qtd > 1) { mont.qtd--; atualizarRodapeMontador(); } });
 $('#montador-mais').addEventListener('click', () => { if (mont && mont.qtd < 30) { mont.qtd++; atualizarRodapeMontador(); } });
 $('#montador-adicionar').addEventListener('click', () => {
-  if (!mont) return;
+  if (!mont || comprasBloqueadas()) return;
   const { produto, selecionadas } = mont;
   let primeiroInvalido = null;
   for (const g of produto.grupos || []) {
@@ -515,7 +541,7 @@ function renderBarraCarrinho() {
   badge.hidden = q === 0;
   badge.textContent = q;
 }
-function abrirCarrinho() { renderCarrinho(); abrirOverlay('carrinho'); }
+function abrirCarrinho() { if (comprasBloqueadas()) return; renderCarrinho(); abrirOverlay('carrinho'); }
 function renderCarrinho() {
   const cont = $('#carrinho-itens');
   cont.innerHTML = '';
@@ -1044,4 +1070,13 @@ document.addEventListener('DOMContentLoaded', iniciar);
   }
   btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
   avaliar();
+})();
+
+/* Tema (v1.9.29): a cor da barra do navegador acompanha o tema da loja. */
+(function () {
+  try {
+    const deep = getComputedStyle(document.documentElement).getPropertyValue('--deep').trim();
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (deep && meta) meta.setAttribute('content', deep);
+  } catch { /* visual apenas */ }
 })();

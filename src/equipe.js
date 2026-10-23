@@ -19,6 +19,9 @@
 //   as migrações idempotentes no boot (ADD COLUMN IF NOT EXISTS).
 // ============================================================================
 const { get, all, run, execSql, modoBanco } = require('./db');
+// Projeto ORIGINAL (loja única): a loja ativa é sempre a 1 — as
+// consultas escopadas da linha SaaS funcionam iguais aqui.
+const lid = () => 1;
 const { hashSenha } = require('./util');
 const { mesValido, limitesDoMes } = require('./financeiro');
 
@@ -197,11 +200,12 @@ function funcionarioPublico(u) {
   };
 }
 async function listarFuncionarios() {
-  const rows = await all("SELECT * FROM usuarios WHERE perfil='funcionario' ORDER BY nome, id");
-  return rows.map(funcionarioPublico);
+  const rows = await all(`SELECT * FROM usuarios WHERE perfil='funcionario' AND loja_id=${lid()} ORDER BY nome, id`);
+  const abertos = await trabalhandoAgora();
+  return rows.map((r) => ({ ...funcionarioPublico(r), trabalhando: abertos.has(Number(r.id)) }));
 }
 async function getFuncionario(id) {
-  const u = await get("SELECT * FROM usuarios WHERE id=? AND perfil='funcionario'", Number(id));
+  const u = await get(`SELECT * FROM usuarios WHERE id=? AND perfil='funcionario' AND loja_id=${lid()}`, Number(id));
   return u || null;
 }
 async function loginEmUso(login, excetoId) {
@@ -396,11 +400,37 @@ async function relatorioPontoMes(mes) {
   return { mes, funcionarios };
 }
 
+// ---------- Trava "Trabalhando" (v1.11.0) ----------
+// O funcionário não bate ponto: ele DECLARA que está trabalhando, e só
+// aí o servidor libera mexer nos pedidos. Começar dispara aviso pro
+// ADM (Telegram do dono) — é a prova de presença no sistema web.
+async function sessaoTrabalhoAberta(usuarioId) {
+  return get('SELECT * FROM trabalho_sessoes WHERE usuario_id=? AND fim IS NULL ORDER BY id DESC LIMIT 1', usuarioId);
+}
+async function iniciarTrabalho(usuario) {
+  const aberta = await sessaoTrabalhoAberta(usuario.id);
+  if (aberta) return aberta;
+  const info = await run('INSERT INTO trabalho_sessoes (loja_id, usuario_id) VALUES (?, ?)', usuario.loja_id || lid(), usuario.id);
+  try {
+    const notif = require('./notificacoes');
+    await notif.enfileirar({ canal: 'telegram_dono', corpo: `*${usuario.nome}* começou a trabalhar agora — a tela de pedidos foi liberada pra ele.` });
+  } catch (e) { console.error('[equipe] aviso trabalhando:', e.message); }
+  return get('SELECT * FROM trabalho_sessoes WHERE id=?', info.lastInsertRowid);
+}
+async function encerrarTrabalho(usuario) {
+  await run("UPDATE trabalho_sessoes SET fim=datetime('now') WHERE usuario_id=? AND fim IS NULL", usuario.id);
+}
+async function trabalhandoAgora() {
+  const rows = await all(`SELECT usuario_id FROM trabalho_sessoes WHERE loja_id=${lid()} AND fim IS NULL`);
+  return new Set(rows.map((r) => Number(r.usuario_id)));
+}
+
 module.exports = {
   preparar, podeLogarAgora, jornadaPublica,
   listarFuncionarios, getFuncionario, criarFuncionario, atualizarFuncionario,
   redefinirSenhaFuncionario, excluirFuncionario,
   pontoHoje, registrarEntrada, registrarSaida, lancarAjuste, relatorioPontoMes,
+  sessaoTrabalhoAberta, iniciarTrabalho, encerrarTrabalho, trabalhandoAgora,
   // exportados p/ teste/depuração
   _internos: { partesSP, dataStrSP, hhmmSP, minutosSP, diaSemanaDe, parseDbDate, spWallParaUtc, resumirDia, fmtDuracao, normalizarDias },
 };

@@ -10,12 +10,14 @@ const db = require('./src/db');
 const { get, all, run } = db;
 const util = require('./src/util');
 const limite = require('./src/limite');
+const tema = require('./src/tema');
 util.carregarEnv(path.join(__dirname, '.env'));
 
 const pedidosCore = require('./src/pedidos');
 const financeiro = require('./src/financeiro');
 const equipe = require('./src/equipe');
 const entregadores = require('./src/entregadores');
+const ifood = require('./src/ifood');
 const fidelidade = require('./src/fidelidade');
 const pushPainel = require('./src/push');
 const recuperacao = require('./src/recuperacao');
@@ -43,7 +45,7 @@ app.use((req, res, next) => {
 // notificações). TODA rota /api aguarda essa promise — no SQLite é imediata;
 // no Postgres (Supabase) é o que garante schema conferido e seed aplicado
 // antes da primeira resposta. Se rejeitar, a API responde 500 com a causa.
-const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await fidelidade.preparar(); await pushPainel.preparar(); await recuperacao.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
+const pronto = (async () => { await db.init(); await equipe.preparar(); await entregadores.preparar(); await ifood.preparar(); await fidelidade.preparar(); await pushPainel.preparar(); await recuperacao.preparar(); await pedidosCore.preparar(); await notif.preparar(); })();
 pronto.catch((e) => console.error('[banco]', e.message));
 app.use('/api', async (req, res, next) => {
   try { await pronto; next(); }
@@ -74,6 +76,19 @@ async function autenticar(req, res, next) {
   req.usuario = await get('SELECT id, nome, login, perfil, ativo, hora_entrada, hora_saida, dias_semana, janela_antes_min, janela_depois_min FROM usuarios WHERE id=?', sessao.usuario_id);
   if (!req.usuario) return res.status(401).json({ erro: 'Usuário não encontrado.' });
   if (Number(req.usuario.ativo) === 0) return res.status(401).json({ erro: 'Usuário desativado. Fale com o administrador.' });
+  // Funcionário (v1.11.0): o mundo dele é a tela de Pedidos — qualquer
+  // outra rota do painel responde 403, mesmo digitando o endereço.
+  if (req.usuario.perfil === 'funcionario' && req.path.startsWith('/api/painel')) {
+    const p = req.path, m = req.method;
+    const livre =
+      p.startsWith('/api/painel/push/') ||
+      (m === 'GET' && (p === '/api/painel/pedidos' || p === '/api/painel/eventos' || p === '/api/painel/trabalhando' || p === '/api/painel/loja' || p === '/api/painel/saude' ||
+        /^\/api\/painel\/pedidos\/\d+$/.test(p) || /^\/api\/painel\/pedidos\/\d+\/entregas$/.test(p))) ||
+      (m === 'POST' && (p === '/api/painel/trabalhando' || p === '/api/painel/trocar-senha' ||
+        /^\/api\/painel\/pedidos\/\d+\/transicao$/.test(p) || /^\/api\/painel\/pedidos\/\d+\/imprimir$/.test(p) ||
+        /^\/api\/painel\/pedidos\/\d+\/entregas\/despachar$/.test(p)));
+    if (!livre) return res.status(403).json({ erro: 'Seu acesso é só à tela de pedidos.' });
+  }
   req.token = token;
   next();
 }
@@ -134,6 +149,15 @@ app.post('/api/auth/trocar-senha', auth, h(async (req, res) => {
 }));
 
 // ---------------- Públicas ----------------
+// Tema do sistema (v1.9.29): CSS gerado com a paleta derivada das 2
+// cores da loja. As páginas linkam DEPOIS do CSS base — as variáveis
+// daqui vencem. Sem cores salvas, sai a paleta original (nada muda).
+app.get('/tema.css', h(async (req, res) => {
+  const loja = await pedidosCore.getLoja();
+  res.type('text/css').setHeader('Cache-Control', 'public, max-age=30');
+  res.send(tema.cssDoTema(loja && loja.cor_primaria, loja && loja.cor_destaque));
+}));
+
 app.get('/api/public/loja', h(async (req, res) => {
   const loja = await pedidosCore.getLoja();
   const estado = util.lojaEstaAberta(loja);
@@ -144,6 +168,7 @@ app.get('/api/public/loja', h(async (req, res) => {
     id: loja.id, nome: loja.nome, logo_url: loja.logo_url, capa_url: loja.capa_url,
     whatsapp: loja.whatsapp, instagram: loja.instagram, endereco_texto: loja.endereco_texto,
     documento: loja.documento || null,
+    cor_primaria: loja.cor_primaria || null, cor_destaque: loja.cor_destaque || null,
     tempo_preparo_min: loja.tempo_preparo_min, tempo_entrega_min: loja.tempo_entrega_min,
     pedido_minimo_centavos: loja.pedido_minimo_centavos, taxa_unica_centavos: loja.taxa_unica_centavos,
     chave_pix: chavePix, aberta: estado.aberta, pausada: estado.pausada, mensagem_status: estado.mensagem,
@@ -243,12 +268,30 @@ app.get('/api/painel/pedidos', auth, h(async (req, res) => {
   for (const p of lista) saida.push({ ...p, itens: await pedidosCore.getItensPedido(p.id) });
   res.json(saida);
 }));
+// Trava "Trabalhando" (v1.11.0): o funcionário declara que está
+// trabalhando; só com a sessão aberta o servidor aceita ele mexer
+// nos pedidos. Começar avisa o ADM no Telegram.
+app.get('/api/painel/trabalhando', auth, h(async (req, res) => {
+  const s = await equipe.sessaoTrabalhoAberta(req.usuario.id);
+  res.json({ trabalhando: !!s, desde: s ? s.inicio : null });
+}));
+app.post('/api/painel/trabalhando', auth, h(async (req, res) => {
+  if ((req.body || {}).ativo) {
+    const s = await equipe.iniciarTrabalho(req.usuario);
+    return res.json({ trabalhando: true, desde: s.inicio });
+  }
+  await equipe.encerrarTrabalho(req.usuario);
+  res.json({ trabalhando: false });
+}));
 app.get('/api/painel/pedidos/:id', auth, h(async (req, res) => {
   const p = await pedidosCore.getPedido(Number(req.params.id));
   if (!p) return res.status(404).json({ erro: 'Pedido não encontrado.' });
   res.json(await pedidosCore.detalhePedido(p));
 }));
 app.post('/api/painel/pedidos/:id/transicao', auth, h(async (req, res) => {
+  if (req.usuario.perfil === 'funcionario' && !(await equipe.sessaoTrabalhoAberta(req.usuario.id))) {
+    return res.status(403).json({ erro: 'Toque em TRABALHANDO pra começar a operar os pedidos.', trava: true });
+  }
   const { para_status, motivo, codigo_entrega, sem_codigo } = req.body || {};
   const r = await pedidosCore.transicionar(Number(req.params.id), String(para_status || ''), {
     origem: 'painel', motivo: motivo || null, autor: req.usuario.nome,
@@ -291,6 +334,9 @@ app.get('/api/painel/pedidos/:id/entregas', auth, h(async (req, res) => {
   res.json(await entregadores.entregasDoPedido(p.id));
 }));
 app.post('/api/painel/pedidos/:id/entregas/despachar', auth, h(async (req, res) => {
+  if (req.usuario.perfil === 'funcionario' && !(await equipe.sessaoTrabalhoAberta(req.usuario.id))) {
+    return res.status(403).json({ erro: 'Toque em TRABALHANDO pra começar a operar os pedidos.', trava: true });
+  }
   const p = await pedidosCore.getPedido(Number(req.params.id));
   if (!p) return res.status(404).json({ erro: 'Pedido não encontrado.' });
   if (p.tipo !== 'entrega') return res.status(422).json({ erro: 'Entregador só se chama em pedido de entrega.' });
@@ -452,15 +498,24 @@ app.post('/api/painel/upload', auth, soAdmin, upload.single('arquivo'), async (r
 // ---------------- Painel: loja ----------------
 app.get('/api/painel/loja', auth, h(async (req, res) => res.json(await pedidosCore.getLoja())));
 app.patch('/api/painel/loja', auth, soAdmin, h(async (req, res) => {
-  const campos = ['nome', 'logo_url', 'capa_url', 'whatsapp', 'instagram', 'endereco_texto', 'tempo_preparo_min', 'tempo_entrega_min', 'pedido_minimo_centavos', 'taxa_unica_centavos', 'chave_pix', 'documento', 'email_pedidos', 'aberta_manual', 'horario_abre', 'horario_fecha', 'som_pedido'];
+  const campos = ['nome', 'logo_url', 'capa_url', 'whatsapp', 'instagram', 'endereco_texto', 'tempo_preparo_min', 'tempo_entrega_min', 'pedido_minimo_centavos', 'taxa_unica_centavos', 'chave_pix', 'documento', 'email_pedidos', 'aberta_manual', 'horario_abre', 'horario_fecha', 'som_pedido', 'cor_primaria', 'cor_destaque'];
   const corpo = req.body || {};
   // documento guarda só os dígitos (a máscara é aplicada na exibição)
   if (corpo.documento !== undefined) corpo.documento = String(corpo.documento || '').replace(/\D/g, '').slice(0, 14) || null;
+  // cores do tema: só hex válido (#RRGGBB) ou vazio (= volta ao padrão)
+  for (const c of ['cor_primaria', 'cor_destaque']) {
+    if (corpo[c] !== undefined) {
+      const v = String(corpo[c] || '').trim();
+      if (v && !tema.validaHex(v)) return res.status(422).json({ erro: 'Cor inválida — use o formato #RRGGBB.' });
+      corpo[c] = v ? v.toUpperCase() : null;
+    }
+  }
   const usar = campos.filter(c => corpo[c] !== undefined);
   if (usar.length) {
     const vals = usar.map(c => (typeof corpo[c] === 'boolean' ? (corpo[c] ? 1 : 0) : corpo[c]));
     await run(`UPDATE lojas SET ${usar.map(c => c + '=?').join(',')}, updated_at=datetime('now') WHERE id=1`, ...vals);
     eventos.emitir('loja', { acao: 'atualizada' });
+    notif.atualizarNomeLoja().catch(() => {});
   }
   res.json(await pedidosCore.getLoja());
 }));
@@ -711,6 +766,30 @@ app.get('/api/painel/push/chave', auth, (req, res) => {
   if (!chave) return res.status(503).json({ erro: 'Push indisponível neste servidor.' });
   res.json({ chave });
 });
+
+/* ----- iFood (v1.11.3 — config_ifood) ----- */
+app.get('/api/painel/ifood/config', auth, soAdmin, h(async (req, res) => {
+  res.json(await ifood.cfgPublica());
+}));
+app.put('/api/painel/ifood/config', auth, soAdmin, h(async (req, res) => {
+  try { res.json(await ifood.salvarCfg(req.body || {})); }
+  catch (e) { res.status(422).json({ erro: e.message }); }
+}));
+app.post('/api/painel/ifood/verificar', auth, soAdmin, h(async (req, res) => {
+  try { res.json(await ifood.verificarAgora()); }
+  catch (e) { res.status(502).json({ erro: e.message }); }
+}));
+// Polling do iFood (v1.12.0): a cada 30s, cada loja com a integração
+// ativa busca os eventos e importa os pedidos novos pro painel.
+async function cicloIfood() {
+  try {
+    const lojas = await ifood.lojasAtivas();
+    for (const l of lojas) {
+      await ifood.verificarAgora().catch((e) => console.error('[ifood] loja ' + l.id + ':', e.message));
+    }
+  } catch (e) { console.error('[ifood] ciclo:', e.message); }
+}
+pronto.then(() => { setInterval(cicloIfood, 30000); });
 app.post('/api/painel/push/inscrever', auth, h(async (req, res) => {
   const r = await pushPainel.inscrever(req.usuario.id, (req.body || {}).subscription, req.headers['user-agent']);
   if (!r.ok) return res.status(422).json({ erro: r.erro });
@@ -811,6 +890,42 @@ app.get('/api/painel/stream', h(async (req, res) => {
 // vira "app" instalável no celular do dono (sem loja de aplicativos).
 // Backup dos dados (v1.9.28): JSON com as tabelas de negócio — SEM
 // hashes de senha, tokens ou segredos de integração.
+// Primeiros Passos (v1.9.30): o assistente de primeira configuração lê o
+// estado REAL da loja e devolve o que já foi feito e o que falta.
+app.get('/api/painel/primeiros-passos', auth, soAdmin, h(async (req, res) => {
+  const loja = await pedidosCore.getLoja();
+  let setup = {};
+  try { setup = JSON.parse((loja && loja.setup_json) || '{}'); } catch { setup = {}; }
+  const produtos = await get('SELECT COUNT(*) AS c FROM produtos WHERE loja_id=1');
+  const bairros = await get('SELECT COUNT(*) AS c FROM bairros WHERE loja_id=1 AND ativo=1');
+  const u = await get('SELECT senha_hash FROM usuarios WHERE id=?', req.usuario.id);
+  res.json({
+    nome_loja: loja ? loja.nome : '',
+    nome_ok: !!(loja && loja.nome && loja.nome !== 'Minha Loja'),
+    logo_ok: !!(loja && loja.logo_url && loja.logo_url !== '/img/logo-padrao.png'),
+    tema_ok: !!(loja && loja.cor_primaria),
+    whatsapp_ok: !!(loja && loja.whatsapp && String(loja.whatsapp).replace(/\D/g, '').length >= 10),
+    endereco_ok: !!(loja && loja.endereco_texto && String(loja.endereco_texto).trim()),
+    horario_ok: !!setup.horario_ok,
+    produtos_total: produtos ? Number(produtos.c) : 0,
+    entrega_ok: (bairros ? Number(bairros.c) : 0) > 0 || (loja && loja.taxa_unica_centavos != null) || !!setup.taxa_ok,
+    senha_ok: u ? !util.verificaSenha('admin123', u.senha_hash) : false,
+    aberta: !!(loja && loja.aberta_manual),
+    ocultar: !!setup.ocultar,
+  });
+}));
+
+app.post('/api/painel/primeiros-passos/confirmar', auth, soAdmin, h(async (req, res) => {
+  const chave = String((req.body || {}).chave || '');
+  if (!['horario_ok', 'taxa_ok', 'ocultar'].includes(chave)) return res.status(422).json({ erro: 'Confirmação inválida.' });
+  const loja = await pedidosCore.getLoja();
+  let setup = {};
+  try { setup = JSON.parse((loja && loja.setup_json) || '{}'); } catch { setup = {}; }
+  setup[chave] = true;
+  await run('UPDATE lojas SET setup_json=? WHERE id=1', JSON.stringify(setup));
+  res.json({ ok: true });
+}));
+
 app.get('/api/painel/backup', auth, soAdmin, h(async (req, res) => {
   const tabelas = ['lojas', 'categorias', 'produtos', 'produto_grupos', 'grupos_opcoes', 'opcoes',
     'bairros', 'clientes', 'pedidos', 'pedido_itens', 'pedido_item_opcoes', 'pedido_status_historico',
@@ -840,8 +955,8 @@ app.get('/painel.webmanifest', h(async (req, res) => {
     scope: '/painel',
     display: 'standalone',
     orientation: 'portrait',
-    background_color: '#3C0151',
-    theme_color: '#3C0151',
+    background_color: tema.paleta(loja && loja.cor_primaria, loja && loja.cor_destaque)['--night'],
+    theme_color: tema.paleta(loja && loja.cor_primaria, loja && loja.cor_destaque)['--deep'],
     icons: [
       { src: '/img/pwa/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
       { src: '/img/pwa/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },

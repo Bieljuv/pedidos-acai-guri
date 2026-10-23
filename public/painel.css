@@ -469,9 +469,9 @@ tr.ponto-aberto td{background:#fdf3d8}
 :root[data-tema="escuro"] .pcard-total,
 :root[data-tema="escuro"] .det-totais .total,
 :root[data-tema="escuro"] .fin-res-item strong,
-:root[data-tema="escuro"] .ponto-func-head .total{color:#f2c1f7}
+:root[data-tema="escuro"] .ponto-func-head .total{color:var(--destaque-claro, #F2C1F7)}
 :root[data-tema="escuro"] .codigo-box .codigo-rot{color:#eec9f5}
-:root[data-tema="escuro"] .guia li::marker{color:#f2c1f7}
+:root[data-tema="escuro"] .guia li::marker{color:var(--destaque-claro, #F2C1F7)}
 
 /* Sorteio (v1.9.18) — modal do ganhador */
 .sor-overlay{position:fixed;inset:0;background:rgba(31,4,33,.62);z-index:80;display:flex;align-items:center;justify-content:center;padding:1rem}
@@ -482,7 +482,7 @@ tr.ponto-aberto td{background:#fdf3d8}
 .sor-sub{color:var(--muted);line-height:1.5}
 .sor-acoes{display:flex;gap:.6rem;justify-content:center;margin-top:1.2rem;flex-wrap:wrap}
 @keyframes sorPulse{0%{transform:scale(.92)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
-:root[data-tema="escuro"] .sor-nome{color:#F2C1F7}
+:root[data-tema="escuro"] .sor-nome{color:var(--destaque-claro, #F2C1F7)}
 :root[data-tema="escuro"] .sor-tit{color:#d9a7e8}
 
 /* Vínculo do Telegram por código (v1.9.25) */
@@ -527,3 +527,60 @@ tr.ponto-aberto td{background:#fdf3d8}
 @media (min-width:861px){
   body:not(.menu-fixado) .sidebar:not(:hover) .side-user span{font-size:0}
 }
+
+/* Tema do sistema (v1.9.29) */
+.tema-box{margin-top:1rem;border-top:1px dashed var(--linha);padding-top:1rem}
+.tema-box input[type="color"]{width:100%;height:44px;padding:2px;cursor:pointer}
+.tema-presets{display:flex;flex-wrap:wrap;gap:.5rem;margin:.4rem 0 .8rem}
+.tema-chip{display:flex;align-items:center;gap:.45rem;border:1px solid var(--linha);background:var(--card);border-radius:999px;padding:.32rem .7rem .32rem .35rem;font-size:.82rem;font-weight:700;cursor:pointer;color:var(--ink)}
+.tema-chip .bolas{display:flex}
+.tema-chip .bola{width:18px;height:18px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.tema-chip .bola + .bola{margin-left:-7px}
+.tema-chip.sel{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary)}
+.tema-previa{border:1px solid var(--linha);border-radius:14px;overflow:hidden;margin-top:.4rem}
+.tema-previa .tp-topo{background:var(--deep);color:#fff;display:flex;justify-content:space-between;align-items:center;padding:.6rem .8rem}
+.tema-previa .tp-nome{font-weight:800}
+.tema-previa .tp-btn{background:var(--primary);border-radius:999px;padding:.3rem .7rem;font-size:.8rem;font-weight:700}
+.tema-previa .tp-corpo{display:flex;justify-content:space-between;align-items:center;padding:.7rem .8rem;background:var(--bg)}
+.tema-previa .tp-preco{color:var(--primary);font-weight:800}
+.tema-previa .tp-barra{padding:.55rem .8rem;background:var(--card)}
+.tema-previa .tp-acao{display:block;text-align:center;background:var(--primary);color:#fff;border-radius:999px;padding:.5rem;font-weight:800;font-size:.88rem}
+
+/* Primeiros Passos (v1.9.30) */
+.passos-progresso{display:flex;align-items:center;gap:.8rem;margin-top:.7rem}
+.passos-barra{flex:1;height:12px;border-radius:999px;background:var(--linha);overflow:hidden}
+.passos-barra span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:999px;transition:width .4s ease}
+.passos-lista{display:grid;gap:.6rem;margin:.8rem 0}
+.passo{display:flex;gap:.8rem;align-items:flex-start;background:var(--card);border:1px solid var(--linha);border-radius:14px;padding:.85rem 1rem}
+.passo .p-ic{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--linha);color:var(--ink);font-weight:800}
+.passo.feito .p-ic{background:#1E7A34;color:#fff}
+.passo .p-txt{flex:1;min-width:0}
+.passo .p-txt strong{display:block}
+.passo .p-txt p{margin:.15rem 0 0;color:var(--muted,#6b5570);font-size:.88rem}
+.passo .p-acoes{display:flex;gap:.45rem;flex-wrap:wrap;flex:none}
+.passo.feito{opacity:.75}
+.link-btn{background:none;border:none;color:var(--primary);font-weight:700;cursor:pointer;padding:0;text-decoration:underline}
+.passos-pronto{border-color:#1E7A34}
+
+/* Trava "Trabalhando" (v1.11.0) — o funcionário declara que está
+   trabalhando; sem isso o quadro de pedidos fica visível mas travado. */
+body.perfil-func .menu-item:not([data-view="pedidos"]) { display: none !important; }
+.trava-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  border: 2px solid #b97f16; background: rgba(185, 127, 22, .14); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; }
+.trava-card .trava-texto strong { display: block; font-size: 16px; }
+.trava-card .trava-texto span { color: var(--mut, #b9a8cc); font-size: 13px; }
+.trava-card.on { border-color: #2f9e5f; background: rgba(47, 158, 95, .13); }
+.trava-card .btn { font-size: 15px; padding: 12px 22px; font-weight: 800; letter-spacing: .4px; }
+#view-pedidos.travado #board, #view-pedidos.travado .toolbar { opacity: .45; pointer-events: none; }
+
+/* Caixas expansíveis das Configurações (v1.11.1) */
+.acc-form .acc-head { cursor: pointer; user-select: none; }
+.acc-form .acc-seta { margin-left: auto; display: inline-flex; align-items: center; transition: transform .18s ease; opacity: .75; flex: none; }
+.acc-form:not(.fechado) .acc-seta { transform: rotate(90deg); }
+.acc-form.fechado .acc-body { display: none; }
+.acc-form .acc-head { display: flex; align-items: flex-start; gap: 10px; }
+.acc-form .acc-head > div:first-child { flex: 1; min-width: 0; }
+
+/* Selo de origem iFood no cartão do pedido (v1.12.0) */
+.pcard-ifood { display: inline-block; background: #ea1d2c; color: #fff; font-weight: 800; font-size: 11px;
+  border-radius: 999px; padding: 2px 9px; margin-top: 4px; letter-spacing: .3px; }

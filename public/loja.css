@@ -44,7 +44,10 @@ img{max-width:100%}
   display:flex; align-items:center; gap:10px; padding:8px 14px;
 }
 .htextos{display:flex;flex-direction:column;line-height:1.15;min-width:0}
-.hnome{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Nome no topo so aparece ao rolar (v1.13.2): no alto da pagina a logo
+   do hero ja traz o nome — repetir era ruido. Rolou, ele surge. */
+.hnome{font-weight:800;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transform:translateY(5px);transition:opacity .25s ease,transform .25s ease;pointer-events:none}
+body.rolou .hnome{opacity:1;transform:none}
 .hstatus{font-size:12px;font-weight:700}
 .hstatus.aberta{color:#7CF29C}
 .hstatus.fechada{color:#FFB3B3}
@@ -508,7 +511,7 @@ img{max-width:100%}
 :root[data-tema="escuro"] .linha-total strong,
 :root[data-tema="escuro"] .resumo-total strong,
 :root[data-tema="escuro"] .btn-texto,
-:root[data-tema="escuro"] .btn-voltar{color:#F2C1F7}
+:root[data-tema="escuro"] .btn-voltar{color:var(--destaque-claro, #F2C1F7)}
 :root[data-tema="escuro"] .chip{color:#EFD9F5;border-color:#7A4A86}
 :root[data-tema="escuro"] .opcao .op-preco.gratis{color:#5ED97E}
 
@@ -524,7 +527,7 @@ img{max-width:100%}
 .fidel-dot{width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.28);border:2px solid rgba(255,255,255,.55)}
 .fidel-dot.on{background:#ffd968;border-color:#ffd968}
 .ck-fidelidade{background:#f3e8f7;border:1px solid #d9b8ec;color:#4a1066;border-radius:10px;padding:10px 12px;font-size:.9rem;line-height:1.45;margin:2px 0 6px}
-:root[data-tema="escuro"] .ck-fidelidade{background:#2c1540;border-color:#7A4A86;color:#F2C1F7}
+:root[data-tema="escuro"] .ck-fidelidade{background:#2c1540;border-color:#7A4A86;color:var(--destaque-claro, #F2C1F7)}
 
 /* Voltar ao topo (v1.9.23) — aparece só depois de rolar; sobe quando a
    barra do carrinho está visível, pra nunca ficar embaixo dela. */
@@ -532,4 +535,11 @@ img{max-width:100%}
 .btn-topo .ic{width:22px;height:22px;transform:rotate(-90deg)}
 .btn-topo.visivel{opacity:1;transform:none;pointer-events:auto}
 .btn-topo.acima{bottom:calc(84px + env(safe-area-inset-bottom))}
-:root[data-tema="escuro"] .btn-topo{background:#2c1540;color:#F2C1F7;border-color:#7A4A86}
+:root[data-tema="escuro"] .btn-topo{background:#2c1540;color:var(--destaque-claro, #F2C1F7);border-color:#7A4A86}
+
+/* Loja fechada (v1.12.1): botões de compra inativos (só Insta/Whats ativos) */
+body.loja-fechada .card-produto:not(.esgotado) { opacity: .55; filter: grayscale(.35); }
+body.loja-fechada #barra-carrinho:disabled,
+body.loja-fechada #hdr-carrinho:disabled,
+body.loja-fechada #btn-ir-checkout:disabled,
+body.loja-fechada #montador-adicionar:disabled { opacity: .5; pointer-events: none; }

@@ -1,4 +1,12 @@
 'use strict';
+
+// Nome da loja nas descrições/mensagens de pagamento (v1.9.29).
+let _nomeLojaCache = null;
+async function nomeLoja() {
+  if (_nomeLojaCache) return _nomeLojaCache;
+  try { const l = await get('SELECT nome FROM lojas WHERE id=1'); if (l && l.nome) _nomeLojaCache = l.nome; } catch { /* ignora */ }
+  return _nomeLojaCache || 'a loja';
+}
 // Meios de Recebimento + pagamentos online (Mercado Pago / Asaas).
 // Regra de ouro do contrato: erro de gateway NUNCA bloqueia a venda — o pedido
 // nasce com pagamento.status = 'erro_config' e a loja cobra manualmente.
@@ -84,7 +92,7 @@ async function mpCriarPagamento(pedido, metodo) {
       method: 'POST', headers, signal: AbortSignal.timeout(15000),
       body: JSON.stringify({
         transaction_amount: pedido.total_centavos / 100,
-        description: `Pedido #${pedido.numero} — Açaí do Guri`,
+        description: `Pedido #${pedido.numero} — ${await nomeLoja()}`,
         payment_method_id: 'pix',
         external_reference: String(pedido.id),
         // MP exige payer.email; sem cadastro de e-mail do cliente usamos o da loja (limitação registrada no contrato)
@@ -100,7 +108,7 @@ async function mpCriarPagamento(pedido, metodo) {
   const resp = await fetch('https://api.mercadopago.com/checkout/preferences', {
     method: 'POST', headers, signal: AbortSignal.timeout(15000),
     body: JSON.stringify({
-      items: [{ title: `Pedido #${pedido.numero} — Açaí do Guri`, quantity: 1, unit_price: pedido.total_centavos / 100, currency_id: 'BRL' }],
+      items: [{ title: `Pedido #${pedido.numero} — ${await nomeLoja()}`, quantity: 1, unit_price: pedido.total_centavos / 100, currency_id: 'BRL' }],
       external_reference: String(pedido.id),
     }),
   });
@@ -132,7 +140,7 @@ async function asaasCriarPagamento(pedido, metodo) {
     billingType: metodo === 'pix_asaas' ? 'PIX' : 'UNDEFINED',
     value: pedido.total_centavos / 100,
     dueDate: vencimento,
-    description: `Pedido #${pedido.numero} — Açaí do Guri`,
+    description: `Pedido #${pedido.numero} — ${await nomeLoja()}`,
     externalReference: String(pedido.id),
   });
   let qr = null;
@@ -179,7 +187,7 @@ async function aplicarStatusPagamento(pagamento, novoStatus, eventoResumo) {
   if (!pedido) return;
   if (novoStatus === 'pago') {
     await notif.notificarDonoTexto(`Pagamento do pedido #${pedido.numero} confirmado (${pagamento.provedor}).`, pedido.id);
-    await notif.enfileirar({ canal: 'whatsapp_cliente', destino: pedido.cliente_whatsapp, corpo: `Pagamento do pedido *#${pedido.numero}* confirmado! Obrigado. — Açaí do Guri`, pedidoId: pedido.id });
+    await notif.enfileirar({ canal: 'whatsapp_cliente', destino: pedido.cliente_whatsapp, corpo: `Pagamento do pedido *#${pedido.numero}* confirmado! Obrigado. — ${await nomeLoja()}`, pedidoId: pedido.id });
   }
   eventos.emitir('pedido', { acao: 'pagamento', pedido_id: pedido.id, numero: pedido.numero, pagamento_status: novoStatus });
 }

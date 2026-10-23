@@ -33,6 +33,17 @@ let cfgLinhaCache = {};
 async function linhaCfg() {
   try { return (await get('SELECT * FROM config_notificacoes WHERE id=1')) || {}; } catch { return {}; }
 }
+// Nome da loja nas mensagens (v1.9.29): nada de nome fixo no código —
+// o sistema é genérico e cada instalação fala com a SUA marca.
+let nomeLojaAtual = 'a loja';
+async function atualizarNomeLoja() {
+  try {
+    const l = await get('SELECT nome FROM lojas WHERE id=1');
+    if (l && l.nome) nomeLojaAtual = l.nome;
+  } catch { /* mantém o último nome */ }
+  return nomeLojaAtual;
+}
+
 async function preparar() {
   // Garante a linha única (id=1) e carrega o cache — chamado pelo server.js
   // no boot (promise `pronto`), antes de qualquer rota responder.
@@ -54,6 +65,7 @@ async function preparar() {
     cfgLinhaCache = { ...cfgLinhaCache, telegram_webhook_secret: segredo };
   }
   cfgCache = null;
+  await atualizarNomeLoja();
 }
 function webhookSecret() {
   return (cfgLinhaCache && cfgLinhaCache.telegram_webhook_secret) || null;
@@ -217,7 +229,7 @@ async function salvarCfg(dados = {}) {
 // número (campo "número para o teste real" da tela), ele ENVIA uma
 // mensagem de verdade praquele WhatsApp — é o único jeito de ter certeza
 // de que o cliente vai receber.
-const MSG_TESTE_WHATSAPP = 'Mensagem de teste — Açaí do Guri. Se você recebeu isto, os avisos de pedido do WhatsApp estão funcionando.';
+const msgTesteWhatsapp = () => `Mensagem de teste — ${nomeLojaAtual}. Se você recebeu isto, os avisos de pedido do WhatsApp estão funcionando.`;
 async function testarWhatsapp(numeroTeste) {
   const c = getCfg();
   if (!c.evolutionUrl || !c.evolutionApikey || !c.evolutionInstancia) {
@@ -254,14 +266,14 @@ async function testarWhatsapp(numeroTeste) {
     return { status: 422, erro: 'Informe um WhatsApp válido com DDD para o teste real (ex.: 47 99999-9999).' };
   }
   try {
-    await enviarEvolution(numero, MSG_TESTE_WHATSAPP);
+    await enviarEvolution(numero, msgTesteWhatsapp());
   } catch (e) {
     return { ok: false, mensagem: `A instância está conectada, mas o envio da mensagem de teste falhou (${String(e.message || e).slice(0, 120)}). Confira se o número existe no WhatsApp e tente de novo.` };
   }
   return { ok: true, mensagem: `Teste REAL enviado para o número ${numero} — confira o WhatsApp: a mensagem de teste deve ter chegado.` };
 }
 
-const MSG_TESTE_TELEGRAM = 'Teste de configuração — Açaí do Guri. Se você recebeu isto, os avisos de pedido vão chegar aqui.';
+const msgTesteTelegram = () => `Teste de configuração — ${nomeLojaAtual}. Se você recebeu isto, os avisos de pedido vão chegar aqui.`;
 async function tgApi(token, metodo, corpo) {
   const resp = await fetch(`https://api.telegram.org/bot${token}/${metodo}`, {
     method: corpo ? 'POST' : 'GET',
@@ -292,7 +304,7 @@ async function testarTelegram() {
     return { ok: false, bot_username: botUsername, mensagem: `O token está certo — bot ${botUsername || ''} encontrado. Mas falta o Chat ID: abra o bot no Telegram, mande um "oi" e clique em "Detectar meu chat" aqui nesta tela.` };
   }
   try {
-    const envio = await tgApi(c.telegramBotToken, 'sendMessage', { chat_id: c.telegramChatId, text: MSG_TESTE_TELEGRAM });
+    const envio = await tgApi(c.telegramBotToken, 'sendMessage', { chat_id: c.telegramChatId, text: msgTesteTelegram() });
     if (!envio.resp.ok || !envio.json || !envio.json.ok) {
       return { ok: false, bot_username: botUsername, mensagem: `O bot ${botUsername || ''} está certo, mas não consegui entregar a mensagem de teste no Chat ID salvo. Confira se você já abriu o bot e mandou um "oi" pra ele (o bot só fala com quem já conversou) e se o Chat ID está certo — use o botão "Detectar meu chat".` };
     }
@@ -453,10 +465,10 @@ const escMd = (s) => String(s ?? '').replace(/([_*`\[])/g, '\\$1');
 function msgNovoPedidoDono(pedido, itens) {
   const linhas = itens.map(i => `• ${i.quantidade}x ${escMd(i.nome_snapshot)}`).join('\n');
   const codigo = pedido.codigo_entrega ? `\nCódigo de entrega: *${pedido.codigo_entrega}* (peça ao cliente na hora de entregar)` : '';
-  return `*NOVO PEDIDO #${pedido.numero}* — Açaí do Guri\n${escMd(pedido.cliente_nome)} • ${pedido.tipo === 'entrega' ? 'ENTREGA' : 'RETIRADA'}\n${linhas}\nTotal: *${fmtBRL(pedido.total_centavos)}* (${escMd(pedido.forma_pagamento)})${codigo}\n\nResponda *Confirmar #${pedido.numero}* ou *Cancelar #${pedido.numero}* (ou toque nos botões).`;
+  return `*NOVO PEDIDO #${pedido.numero}* — ${escMd(nomeLojaAtual)}\n${escMd(pedido.cliente_nome)} • ${pedido.tipo === 'entrega' ? 'ENTREGA' : 'RETIRADA'}\n${linhas}\nTotal: *${fmtBRL(pedido.total_centavos)}* (${escMd(pedido.forma_pagamento)})${codigo}\n\nResponda *Confirmar #${pedido.numero}* ou *Cancelar #${pedido.numero}* (ou toque nos botões).`;
 }
 function msgClienteStatus(pedido, para) {
-  const loja = 'Açaí do Guri';
+  const loja = nomeLojaAtual;
   switch (para) {
     case 'NOVO': return `Olá, ${pedido.cliente_nome}! Recebemos seu pedido *#${pedido.numero}* no *${loja}*. Aguardando a confirmação da loja — te avisamos aqui mesmo.`;
     case 'EM_PREPARO': return `Pedido *#${pedido.numero}* *confirmado*! Já estamos preparando seu açaí. — ${loja}`;
@@ -682,6 +694,6 @@ module.exports = {
   enfileirar, processarFila, notificarNovoPedido, notificarTransicao, notificarDonoTexto,
   setTransicaoHandler, iniciar, evolutionConfigurado, telegramConfigurado, tratarUpdateTelegram,
   getCfg, invalidarCfg, cfgPublica, salvarCfg, testarWhatsapp, testarTelegram, detectarChatTelegram,
-  gerarCodigoVinculo, tentarVinculo, webhookSecret, registrarWebhook, escMd,
+  gerarCodigoVinculo, tentarVinculo, webhookSecret, registrarWebhook, escMd, atualizarNomeLoja,
   iniciarPollerTelegram, preparar,
 };

@@ -281,6 +281,10 @@ async function transicionar(pedidoId, para, { origem = 'painel', motivo = null, 
   }
   const atualizado = await getPedido(pedidoId);
   await notif.notificarTransicao(atualizado, para);
+  // iFood (v1.12.0): pedido que veio de lá tem o status devolvido.
+  if (atualizado.origem === 'ifood') {
+    try { require('./ifood').aoMudarStatus(atualizado, para).catch(() => {}); } catch { /* módulo opcional */ }
+  }
   // Fidelidade: entregar pode desbloquear prêmio; cancelar devolve o prêmio.
   try { await fidelidade.aoTransicionar(atualizado, para); } catch { /* nunca trava */ }
   eventos.emitir('pedido', { acao: 'transicao', pedido_id: pedidoId, numero: pedido.numero, para });

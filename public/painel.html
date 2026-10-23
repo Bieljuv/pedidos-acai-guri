@@ -10,6 +10,7 @@
 </script>
 <script src="/icons.js"></script>
 <link rel="stylesheet" href="/painel.css">
+<link rel="stylesheet" href="/tema.css" id="temaCss">
 <link rel="icon" href="/uploads/seed-logo.png">
 <link rel="manifest" href="/painel.webmanifest">
 <meta name="theme-color" content="#3C0151">
@@ -72,6 +73,7 @@
 
     <nav class="menu">
       <button class="menu-item active" data-view="pedidos"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-receipt"></use></svg> Pedidos <span id="badgeNovos" class="badge-count hidden">0</span></button>
+      <button class="menu-item" data-view="primeiros-passos" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-flag"></use></svg> Primeiros Passos <span id="badgePassos" class="badge-count hidden">0</span></button>
       <button class="menu-item" data-view="cardapio"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-book"></use></svg> Cardápio</button>
       <button class="menu-item" data-view="grupos"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-layers"></use></svg> Grupos e Opções</button>
       <button class="menu-item" data-view="bairros"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-scooter"></use></svg> Bairros e Taxas</button>
@@ -105,7 +107,6 @@
     <header class="topbar">
       <h2 id="viewTitle">Pedidos</h2>
       <div class="top-actions">
-        <div id="saudeBox" class="saude" title="Estado das integrações"></div>
         <div class="loja-ctrl" data-admin>
           <label class="switch-wrap">
             <span id="lblAberta">Loja aberta</span>
@@ -134,6 +135,14 @@
 
       <!-- PEDIDOS -->
       <section id="view-pedidos" class="view">
+        <!-- Trava "Trabalhando" (v1.11.0): só aparece pra funcionário -->
+        <div id="travaCard" class="trava-card hidden">
+          <div class="trava-texto">
+            <strong id="travaTitulo">Você ainda não está trabalhando</strong>
+            <span id="travaSub">Toque em TRABALHANDO pra liberar os pedidos. O administrador é avisado quando você começa.</span>
+          </div>
+          <button type="button" class="btn btn-primary" id="btnTrabalhar">TRABALHANDO</button>
+        </div>
         <!-- Ponto eletrônico (v1.8): só aparece pra funcionário -->
         <div id="pontoCard" class="ponto-card hidden"></div>
         <div id="alertaSaida" class="alerta-saida hidden">
@@ -352,8 +361,44 @@
             </label>
             <p class="campo-dica">O som toca alto e repete enquanto houver pedido novo na tela — um clique em qualquer lugar silencia. Escolha o toque e clique em Salvar loja.</p>
           </div>
+          <div class="tema-box">
+            <strong><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-wand"></use></svg> Tema do sistema</strong>
+            <p class="campo-dica">As cores da <strong>sua</strong> loja: valem pra loja pública e pro painel. Escolha um tema pronto ou monte o seu — o sistema deriva os tons (botões, barra lateral, destaques) sozinho a partir das 2 cores.</p>
+            <div class="tema-presets" id="temaPresets"></div>
+            <div class="grid-2">
+              <label>Cor principal <input type="color" id="temaPrimaria" value="#7E047D"></label>
+              <label>Cor de destaque <input type="color" id="temaDestaque" value="#DB04E2"></label>
+            </div>
+            <div class="tema-previa" id="temaPrevia">
+              <div class="tp-topo"><span class="tp-nome">Sua loja</span><span class="tp-btn">Meu pedido</span></div>
+              <div class="tp-corpo"><span class="tp-prod">Produto de exemplo</span><span class="tp-preco">R$ 25,99</span></div>
+              <div class="tp-barra"><span class="tp-acao">Ver meu pedido • R$ 25,99</span></div>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="btnTemaPadrao">Voltar ao roxo original</button>
+            </div>
+          </div>
           <button type="submit" class="btn btn-primary">Salvar loja</button>
         </form>
+      </section>
+
+      <!-- PRIMEIROS PASSOS -->
+      <section id="view-primeiros-passos" class="view hidden">
+        <div class="card passos-intro">
+          <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-flag"></use></svg> Vamos deixar sua loja pronta pra vender</h3>
+          <p class="campo-dica">Siga os passos na ordem — cada um leva direto pra tela certa. Sua loja nasce <strong>fechada</strong>: ela só abre pro público no último passo, quando estiver tudo pronto.</p>
+          <div class="passos-progresso"><div class="passos-barra"><span id="passosBarraFill"></span></div><strong id="passosContagem">0 de 10</strong></div>
+        </div>
+        <div id="passosLista" class="passos-lista"></div>
+        <div class="card passos-pronto hidden" id="passosPronto">
+          <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-check-circle"></use></svg> Sua loja está pronta!</h3>
+          <p>Configuração inicial completa. Agora é vender — compartilhe o link da sua loja com seus clientes.</p>
+          <div class="form-actions">
+            <a class="btn btn-primary" href="/" target="_blank" rel="noopener">Ver minha loja</a>
+            <button type="button" class="btn btn-ghost" id="btnPassosOcultar">Não mostrar esta tela ao entrar</button>
+          </div>
+        </div>
+        <p class="campo-dica"><button type="button" class="link-btn" id="btnPassosOcultar2">Não abrir esta tela automaticamente ao entrar</button> — você sempre a encontra no menu <strong>Primeiros Passos</strong>.</p>
       </section>
 
       <!-- RELATÓRIO DO DIA -->
@@ -751,6 +796,38 @@
           </div>
         </form>
 
+        <form class="card-form" id="formCfgIfood">
+          <div class="form-row between">
+            <div>
+              <strong><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-store"></use></svg> iFood</strong>
+              <div class="dica">Com a integração, os <strong>pedidos do iFood caem direto neste painel</strong> e você ainda pode <strong>chamar o motoboy do iFood</strong> pros pedidos daqui. Pra ligar de verdade, a loja precisa ser <strong>parceira iFood</strong> e a integração passar pela <strong>homologação</strong> — liberadas as credenciais, é só colar aqui.</div>
+            </div>
+            <span class="cfg-pill sim" id="cfgIfoodPill">Desligado</span>
+          </div>
+          <div class="form-row between">
+            <div><strong>Integração iFood ativa</strong><div class="dica">Desligado = nenhuma comunicação com o iFood.</div></div>
+            <span class="switch"><input type="checkbox" id="cfgIfoodAtivo"><span class="slider"></span></span>
+          </div>
+          <label>Client ID
+            <input type="text" id="cfgIfoodClientId" placeholder="Client ID do app homologado" autocomplete="off">
+          </label>
+          <label>Client Secret
+            <span class="copy-row">
+              <input type="password" id="cfgIfoodClientSecret" autocomplete="new-password" placeholder="Cole o Client Secret aqui">
+              <button type="button" class="btn btn-ghost btn-sm" data-mostrar="cfgIfoodClientSecret">Mostrar</button>
+            </span>
+          </label>
+          <label class="chk"><input type="checkbox" id="cfgIfoodLimparSecret"> Apagar o Client Secret salvo</label>
+          <label>Merchant ID (o ID da sua loja no iFood)
+            <input type="text" id="cfgIfoodMerchantId" placeholder="Ex.: 00000000-0000-0000-0000-000000000000" autocomplete="off">
+          </label>
+          <p class="campo-dica" id="cfgIfoodStats">Nenhum pedido do iFood entrou ainda.</p>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Salvar iFood</button>
+            <button type="button" class="btn btn-ghost" id="btnIfoodVerificar">Verificar pedidos agora</button>
+          </div>
+          <p class="campo-dica">Sem homologação aprovada, guarde esta seção desligada: quando as credenciais chegarem, a sincronização de pedidos é ligada aqui, sem trocar de sistema.</p>
+        </form>
         <form class="card-form" id="formCfgBackup">
           <div class="form-row">
             <div>

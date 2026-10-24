@@ -175,6 +175,10 @@ app.get('/api/public/loja', h(async (req, res) => {
     tempo_preparo_min: loja.tempo_preparo_min, tempo_entrega_min: loja.tempo_entrega_min,
     pedido_minimo_centavos: loja.pedido_minimo_centavos, taxa_unica_centavos: loja.taxa_unica_centavos,
     chave_pix: chavePix, aberta: estado.aberta, pausada: estado.pausada, mensagem_status: estado.mensagem,
+    horario_abre: loja.horario_abre || null,
+    horario_fecha: loja.horario_fecha || null,
+    aviso_fechar_ativo: loja.aviso_fechar_ativo === 0 || loja.aviso_fechar_ativo === false ? 0 : 1,
+    aviso_fechar_minutos: loja.aviso_fechar_minutos ?? 30,
     metodos_pagamento: await pagamentos.metodosPublicos(loja),
   });
 }));
@@ -183,6 +187,14 @@ app.get('/api/public/bairros', h(async (req, res) => res.json(await all('SELECT 
 
 app.post('/api/public/pedidos', h(async (req, res) => {
   try {
+    // Corte de pedidos (v1.16.14): na janela final a vitrine nao aceita
+    // pedidos novos — o servidor barra, nao so a tela (o cliente tambem
+    // avisa antes de enviar, mas a palavra final e esta).
+    const lojaCorte = await pedidosCore.getLoja();
+    if (util.lojaEstaAberta(lojaCorte).aberta) {
+      const msgCorte = util.msgCortePedidos(lojaCorte);
+      if (msgCorte) return res.status(422).json({ erro: msgCorte });
+    }
     // método online define a forma base (pix_mp/cartao_mp → provedor; forma_pagamento legado é derivado)
     const corpo = { ...(req.body || {}) };
     const metodo = String(corpo.metodo_pagamento || corpo.forma_pagamento || 'dinheiro');
@@ -556,7 +568,7 @@ app.post('/api/painel/upload', auth, soAdmin, upload.single('arquivo'), async (r
 // ---------------- Painel: loja ----------------
 app.get('/api/painel/loja', auth, h(async (req, res) => res.json(await pedidosCore.getLoja())));
 app.patch('/api/painel/loja', auth, soAdmin, h(async (req, res) => {
-  const campos = ['nome', 'logo_url', 'capa_url', 'whatsapp', 'instagram', 'endereco_texto', 'tempo_preparo_min', 'tempo_entrega_min', 'pedido_minimo_centavos', 'taxa_unica_centavos', 'chave_pix', 'documento', 'email_pedidos', 'aberta_manual', 'horario_abre', 'horario_fecha', 'som_pedido', 'cor_primaria', 'cor_destaque', 'capa_foco'];
+  const campos = ['nome', 'logo_url', 'capa_url', 'whatsapp', 'instagram', 'endereco_texto', 'tempo_preparo_min', 'tempo_entrega_min', 'pedido_minimo_centavos', 'taxa_unica_centavos', 'chave_pix', 'documento', 'email_pedidos', 'aberta_manual', 'horario_abre', 'horario_fecha', 'aviso_fechar_ativo', 'aviso_fechar_minutos', 'som_pedido', 'cor_primaria', 'cor_destaque', 'capa_foco'];
   const corpo = req.body || {};
   // documento guarda só os dígitos (a máscara é aplicada na exibição)
   if (corpo.documento !== undefined) corpo.documento = String(corpo.documento || '').replace(/\D/g, '').slice(0, 14) || null;

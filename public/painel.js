@@ -1368,6 +1368,8 @@ function preencherLoja() {
   $('#lojaAbre').value = l.horario_abre || '';
   $('#lojaFecha').value = l.horario_fecha || '';
   $('#lojaAbertaManual').checked = !!l.aberta_manual;
+  $('#lojaAvisoFechar').checked = l.aviso_fechar_ativo !== 0 && l.aviso_fechar_ativo !== false;
+  $('#lojaAvisoFecharMin').value = l.aviso_fechar_minutos ?? 30;
   $('#lojaSom').value = l.som_pedido || 'padrao';
   $('#lojaLogoUrl').value = l.logo_url || '';
   $('#lojaCapaUrl').value = l.capa_url || '';
@@ -1411,6 +1413,8 @@ $('#formLoja').addEventListener('submit', async (e) => {
     horario_abre: $('#lojaAbre').value || null,
     horario_fecha: $('#lojaFecha').value || null,
     aberta_manual: $('#lojaAbertaManual').checked,
+    aviso_fechar_ativo: $('#lojaAvisoFechar').checked,
+    aviso_fechar_minutos: Math.min(120, Math.max(5, Number($('#lojaAvisoFecharMin').value) || 30)),
     som_pedido: $('#lojaSom').value,
     cor_primaria: $('#temaPrimaria').value,
     cor_destaque: $('#temaDestaque').value,

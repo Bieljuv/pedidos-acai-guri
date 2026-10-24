@@ -33,6 +33,60 @@ function toast(msg) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
 }
 
+/* Corte + aviso "vamos fechar em breve" (v1.16.14): um unico ajuste em
+   Loja e Aparencia (minutos antes de fechar) comanda os dois:
+   - faltando de 2x a 1x os minutos para o fechamento: ao adicionar ao
+     carrinho, o aviso "vamos fechar em breve" com o horario do corte;
+   - dentro dos minutos finais: o pedido NAO passa — o servidor barra
+     (palavra final) e a tela avisa antes de enviar; o aviso no carrinho
+     vira a propria mensagem do corte.
+   Uma vez por aba, para nao repetir a cada item. */
+function minutosAteFechar() {
+  if (!loja || !loja.horario_fecha) return null;
+  const [fh, fm] = String(loja.horario_fecha).split(':').map(Number);
+  if (Number.isNaN(fh)) return null;
+  const agora = new Date();
+  const base = new Date(agora); base.setHours(fh, fm || 0, 0, 0);
+  let menor = Infinity;
+  for (const d of [-86400000, 0, 86400000]) {
+    const diff = (base.getTime() + d - agora.getTime()) / 60000;
+    if (diff >= 0 && diff < menor) menor = diff;
+  }
+  return menor;
+}
+function horaCorte() {
+  const minutos = Number(loja.aviso_fechar_minutos) || 30;
+  const [fh, fm] = String(loja.horario_fecha).split(':').map(Number);
+  let total = fh * 60 + (fm || 0) - minutos;
+  if (total < 0) total += 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+function msgCorteCliente() {
+  if (!loja || !loja.horario_fecha) return '';
+  if (loja.aviso_fechar_ativo === 0 || loja.aviso_fechar_ativo === false) return '';
+  const minutos = Number(loja.aviso_fechar_minutos) || 30;
+  const ate = minutosAteFechar();
+  if (ate === null || ate > minutos) return '';
+  return `Infelizmente já encerramos os pedidos de hoje — a cozinha precisa despachar as últimas entregas antes do fechamento, às ${String(loja.horario_fecha).slice(0, 5)}. Voltamos amanhã às ${String(loja.horario_abre || '13:00').slice(0, 5)}!`;
+}
+function avisoFecharTexto() {
+  if (!loja || !loja.horario_fecha) return '';
+  if (loja.aviso_fechar_ativo === 0 || loja.aviso_fechar_ativo === false) return '';
+  if (sessionStorage.getItem('aviso_fechar_exibido')) return '';
+  const minutos = Number(loja.aviso_fechar_minutos) || 30;
+  const ate = minutosAteFechar();
+  if (ate === null) return '';
+  if (ate <= minutos) {
+    sessionStorage.setItem('aviso_fechar_exibido', '1');
+    return ' ' + msgCorteCliente();
+  }
+  if (ate <= minutos * 2) {
+    sessionStorage.setItem('aviso_fechar_exibido', '1');
+    return ` Vamos fechar em breve! Aceitamos pedidos só até às ${horaCorte()} — finalize a tempo.`;
+  }
+  return '';
+}
+
 /* ---------- Ícones SVG (v1.9: zero emoji na interface) ---------- */
 /* Ícones (v1.9.2): sprite oficial public/icons.js (window.ic); o mapa
    traduz os nomes históricos da loja pros símbolos do sprite. */
@@ -196,7 +250,7 @@ $('#btn-peca-de-novo').addEventListener('click', () => {
   if (!adicionados) { toast('Os itens do último pedido não estão mais disponíveis.'); return; }
   salvarCarrinho();
   abrirCarrinho();
-  toast(pulados ? 'Pedido montado — alguns itens não estão mais no cardápio e ficaram de fora.' : 'Seu pedido de sempre está no carrinho!');
+  toast((pulados ? 'Pedido montado — alguns itens não estão mais no cardápio e ficaram de fora.' : 'Seu pedido de sempre está no carrinho!') + avisoFecharTexto());
 });
 
 /* ---------- cabeçalho: transição de cor dirigida pela rolagem ---------- */
@@ -464,11 +518,36 @@ function renderLoja() {
 
   const banner = $('#banner-fechada');
   if (!aberta) {
-    banner.textContent = loja.mensagem_status ||
+    // Acompanhar com a loja fechada (v1.16.14): o cliente que pediu
+    // antes de fechar perdia o acompanhamento se fechasse a aba — a
+    // home fechada nao tinha nenhum caminho ate o pedido. O botao pede
+    // o WhatsApp e leva direto ao acompanhamento do ultimo pedido.
+    const msg = loja.mensagem_status ||
       (loja.pausada
         ? 'A loja está pausada e não está recebendo pedidos no momento. Volte em instantes!'
         : 'A loja está fechada e não está recebendo pedidos no momento. Você pode olhar o cardápio; volte no horário de funcionamento!');
+    banner.innerHTML = `<span>${esc(msg)}</span>
+      <div class="acomp-fechada">
+        <label for="acomp-fone">Já fez um pedido? Acompanhe aqui mesmo:</label>
+        <span class="acomp-fechada-row">
+          <input id="acomp-fone" type="tel" inputmode="numeric" placeholder="Seu WhatsApp com DDD" maxlength="15">
+          <button type="button" class="btn-primario" id="btn-acomp-fechada">Acompanhar</button>
+        </span>
+      </div>`;
     banner.hidden = false;
+    const irAcomp = async () => {
+      // Numero com DDD tem 11 digitos; o servidor normaliza com 55.
+      let dig = soDigitos($('#acomp-fone').value);
+      if (dig && !dig.startsWith('55')) dig = '55' + dig;
+      if (dig.length < 12) { toast('Informe seu WhatsApp com DDD.'); return; }
+      try {
+        const r = await getJSON('/api/public/ultimo-pedido/' + dig);
+        if (r && r.token) location.hash = '#/pedido/' + r.token;
+        else toast('Não encontramos pedido para este WhatsApp.');
+      } catch { toast('Não foi possível buscar agora. Tente de novo.'); }
+    };
+    $('#btn-acomp-fechada').addEventListener('click', irAcomp);
+    $('#acomp-fone').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); irAcomp(); } });
   } else banner.hidden = true;
   aplicarTravaCompras();
 }
@@ -731,7 +810,7 @@ $('#montador-adicionar').addEventListener('click', () => {
   salvarCarrinho();
   fecharOverlay('montador');
   renderCarrinho();
-  toast('Adicionado ao pedido');
+  toast('Adicionado ao pedido.' + avisoFecharTexto());
 });
 
 /* ============================================================
@@ -1113,6 +1192,10 @@ $('#form-checkout').addEventListener('submit', async (ev) => {
       observacao: i.observacao || '', opcoes: i.opcoes,
     })),
   };
+  // Corte (v1.16.14): avisa antes de enviar e mantem o carrinho — o
+  // servidor barra de qualquer forma, mas o cliente nao espera a volta.
+  const corte = msgCorteCliente();
+  if (corte) { erroCheckout(corte); return; }
   const btn = $('#btn-confirmar');
   btn.disabled = true;
   btn.textContent = 'Enviando…';

@@ -120,14 +120,16 @@ async function precificarItem(item) {
 async function ultimoPedidoDoCliente(whatsapp) {
   const w = normalizaFone(whatsapp);
   if (!w || w.length < 12) return null;
-  const p = await get(`SELECT id, numero FROM pedidos WHERE loja_id=${lid()} AND cliente_whatsapp=? AND status<>'CANCELADO' ORDER BY id DESC LIMIT 1`, w);
+  const p = await get(`SELECT id, numero, token, status FROM pedidos WHERE loja_id=${lid()} AND cliente_whatsapp=? AND status<>'CANCELADO' ORDER BY id DESC LIMIT 1`, w);
   if (!p) return null;
   const itens = await all('SELECT id, produto_id, nome_snapshot, quantidade, observacao FROM pedido_itens WHERE pedido_id=? ORDER BY id', p.id);
   for (const it of itens) {
     it.opcoes = await all('SELECT grupo_nome, opcao_nome FROM pedido_item_opcoes WHERE pedido_item_id=? ORDER BY id', it.id);
     delete it.id;
   }
-  return { numero: p.numero, itens };
+  // token + status: o botao "Acompanhar meu pedido" da loja fechada usa
+  // esta mesma busca para levar o cliente ao acompanhamento (v1.16.14).
+  return { numero: p.numero, token: p.token, status: p.status, itens };
 }
 
 async function criarPedido(corpo) {

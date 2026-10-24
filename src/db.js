@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS lojas (
   aberta_manual INTEGER DEFAULT 1,
   horario_abre TEXT DEFAULT '13:00',
   horario_fecha TEXT DEFAULT '23:00',
+  aviso_fechar_ativo INTEGER DEFAULT 1,
+  aviso_fechar_minutos INTEGER DEFAULT 30,
   som_pedido TEXT DEFAULT 'padrao',
   pausada_ate TEXT,
   proximo_numero INTEGER DEFAULT 1,
@@ -203,6 +205,9 @@ if (MODO === 'sqlite') {
   sq.exec(DDL_SQLITE);
   // Bancos criados antes da v1.2: adiciona a coluna do som de pedido, se faltar.
   try { sq.exec("ALTER TABLE lojas ADD COLUMN som_pedido TEXT DEFAULT 'padrao'"); } catch { /* coluna já existe */ }
+  // v1.16.14: aviso "vamos fechar em breve" (config da loja).
+  try { sq.exec('ALTER TABLE lojas ADD COLUMN aviso_fechar_ativo INTEGER DEFAULT 1'); } catch { /* coluna já existe */ }
+  try { sq.exec('ALTER TABLE lojas ADD COLUMN aviso_fechar_minutos INTEGER DEFAULT 30'); } catch { /* coluna já existe */ }
   // Bancos criados antes da v1.8: jornada do funcionário (Equipe/Ponto) e
   // autoria das transições de pedido. ALTERs idempotentes: se a coluna já
   // existe, o erro é ignorado (a tabela pontos nasce do DDL acima).
@@ -517,6 +522,8 @@ async function init() {
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cor_primaria TEXT');
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS capa_foco TEXT');
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cor_destaque TEXT');
+  await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS aviso_fechar_ativo INTEGER DEFAULT 1');
+  await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS aviso_fechar_minutos INTEGER DEFAULT 30');
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS setup_json TEXT');
   await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origem TEXT DEFAULT 'proprio'");
   await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS externo_id TEXT');

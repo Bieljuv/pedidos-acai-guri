@@ -360,6 +360,8 @@
             <label>Horário que fecha <input type="time" id="lojaFecha"></label>
           </div>
           <label class="chk"><input type="checkbox" id="lojaAbertaManual"> Loja aberta (interruptor manual — fora do horário ela fecha sozinha)</label>
+          <label class="chk"><input type="checkbox" id="lojaAvisoFechar"> Avisar "vamos fechar em breve" e encerrar os pedidos neste prazo antes de fechar</label>
+          <label>Avisar quantos minutos antes de fechar <input type="number" id="lojaAvisoFecharMin" min="5" max="120" step="5"></label>
           <div class="som-config">
             <label><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-bell"></use></svg> Som de novo pedido
               <span class="som-row">

@@ -91,6 +91,7 @@
       <button class="menu-item" data-view="financeiro" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-wallet"></use></svg> Financeiro</button>
       <button class="menu-item" data-view="fidelidade" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Fidelidade</button>
       <button class="menu-item" data-view="equipe" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-users"></use></svg> Equipe</button>
+      <button class="menu-item" data-view="motoboys" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-moto"></use></svg> Motoboys</button>
       <button class="menu-item" data-view="configuracoes" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-gear"></use></svg> Configurações</button>
     </nav>
 
@@ -989,6 +990,18 @@
           </div>
           <p class="dica">Dias <strong>em aberto</strong> (entrada sem saída) ficam destacados — use "Fechar dia" ou "Lançar ajuste" pra corrigir. As horas só contam pares entrada→saída completos.</p>
           <div id="pontoRelatorio"></div>
+        </div>
+      </section>
+
+      <section id="view-motoboys" class="view hidden">
+        <h3 class="view-h">Motoboys</h3>
+        <p class="dica">O motoboy tem login próprio e vê, no painel dele, só os pedidos que você direcionar a ele. Ele aceita a entrega, confirma o recebimento (o cliente vê "saiu para entrega" na hora) e dá baixa com o código do cliente — cada passo fica registrado com o nome dele no histórico do pedido. Toque no motoboy para abrir as configurações de pagamento dele.</p>
+        <div class="bloco">
+          <div class="bloco-head">
+            <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-moto"></use></svg> Motoboys cadastrados</h3>
+            <button class="btn btn-primary btn-sm" id="btnNovoMotoboy">+ Novo motoboy</button>
+          </div>
+          <div id="motoboyList"><p class="dica">Carregando…</p></div>
         </div>
       </section>
 

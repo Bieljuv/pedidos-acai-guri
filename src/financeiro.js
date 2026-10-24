@@ -188,16 +188,19 @@ async function calcularPeriodo(de, ate) {
   const receita_manual = await somaTipo('receita_manual');
   const investimento_manual = await somaTipo('investimento');
   const despesas = await somaTipo('despesa');
+  // Motoboys (v1.16.23): só o pagamento CONFIRMADO entra como gasto, no
+  // dia em que foi confirmado — o "a receber" ainda não é despesa.
+  const motoboy = (await get(`SELECT COALESCE(SUM(valor_centavos),0) AS s FROM motoboy_pagamentos WHERE loja_id=1 AND date(created_at,'localtime') BETWEEN ? AND ?`, de, ate)).s;
   const insumos_total = (await get('SELECT COALESCE(SUM(custo_total_centavos),0) AS s FROM fin_insumos WHERE loja_id=1 AND data BETWEEN ? AND ?', de, ate)).s;
 
   const vendas_sistema = vendas.s;
   const pedidos_concluidos = vendas.c;
   const receita_total = vendas_sistema + receita_manual;
-  const custo_total = insumos_total + despesas + investimento_manual;
+  const custo_total = insumos_total + despesas + investimento_manual + motoboy;
   const lucro_real = receita_total - custo_total;
   // Sem o investimento: quanto as VENDAS deram (o investimento é decisão do
-  // dono, não custo da operação do período).
-  const lucro_operacional = receita_total - (insumos_total + despesas);
+  // dono, não custo da operação do período). Motoboy É custo operacional.
+  const lucro_operacional = receita_total - (insumos_total + despesas + motoboy);
   const preco_medio_copo = copos > 0 ? roundHU(vendas_sistema / copos) : 0;
   const custo_por_copo = copos > 0 ? roundHU(custo_total / copos) : 0;
 
@@ -220,6 +223,8 @@ async function calcularPeriodo(de, ate) {
     insumos_centavos: insumos_total, // alias p/ relatório/XML
     despesas,
     despesas_centavos: despesas, // alias p/ relatório/XML
+    motoboy_total: motoboy,
+    motoboy_centavos: motoboy, // alias p/ relatório/XML
     custo_total,
     lucro_operacional_centavos: lucro_operacional,
     lucro_real,
@@ -365,9 +370,12 @@ async function dadosXmlMensal(mes) {
   const insumos = await all(
     'SELECT data, nome, quantidade, unidade, custo_total_centavos FROM fin_insumos WHERE loja_id=1 AND data BETWEEN ? AND ? ORDER BY data, id',
     primeiro, ultimo);
-  return { rel, pedidos, lancamentos, insumos };
+  const motoboyPagamentos = await all(
+    `SELECT mp.created_at, mp.valor_centavos, mp.modelo, u.nome AS motoboy_nome FROM motoboy_pagamentos mp LEFT JOIN usuarios u ON u.id = mp.motoboy_id WHERE mp.loja_id=1 AND date(mp.created_at,'localtime') BETWEEN ? AND ? ORDER BY mp.created_at, mp.id`,
+    primeiro, ultimo);
+  return { rel, pedidos, lancamentos, insumos, motoboyPagamentos };
 }
-function gerarXmlMensal(nomeLoja, { rel, pedidos, lancamentos, insumos }) {
+function gerarXmlMensal(nomeLoja, { rel, pedidos, lancamentos, insumos, motoboyPagamentos }) {
   const fin = rel.financeiro;
   const tot = rel.totais;
   const at = (v) => escapeXml(v);
@@ -375,7 +383,7 @@ function gerarXmlMensal(nomeLoja, { rel, pedidos, lancamentos, insumos }) {
   linhas.push('<?xml version="1.0" encoding="UTF-8"?>');
   linhas.push('<!-- Relatorio gerencial - nao e documento fiscal -->');
   linhas.push(`<relatorio_mensal loja="${at(nomeLoja)}" mes="${at(rel.mes)}" moeda="BRL" gerado_em="${new Date().toISOString()}">`);
-  linhas.push(`  <resumo faturamento_centavos="${tot.faturamento_centavos}" pedidos_concluidos="${tot.pedidos_concluidos}" pedidos_cancelados="${tot.pedidos_cancelados}" ticket_medio_centavos="${tot.ticket_medio_centavos}" receitas_manuais_centavos="${fin.receita_manual}" insumos_centavos="${fin.insumos_total}" despesas_centavos="${fin.despesas}" investimentos_centavos="${fin.investimento_manual}" lucro_operacional_centavos="${fin.lucro_operacional_centavos}" lucro_real_centavos="${fin.lucro_real}"/>`);
+  linhas.push(`  <resumo faturamento_centavos="${tot.faturamento_centavos}" pedidos_concluidos="${tot.pedidos_concluidos}" pedidos_cancelados="${tot.pedidos_cancelados}" ticket_medio_centavos="${tot.ticket_medio_centavos}" receitas_manuais_centavos="${fin.receita_manual}" insumos_centavos="${fin.insumos_total}" despesas_centavos="${fin.despesas}" investimentos_centavos="${fin.investimento_manual}" motoboy_centavos="${fin.motoboy_total}" lucro_operacional_centavos="${fin.lucro_operacional_centavos}" lucro_real_centavos="${fin.lucro_real}"/>`);
   linhas.push('  <vendas>');
   for (const p of pedidos) {
     linhas.push(`    <pedido numero="${p.numero}" data="${at(dataHoraLocal(p.created_at))}" cliente="${at(p.cliente_nome)}" tipo="${at(p.tipo)}" forma_pagamento="${at(p.forma_pagamento)}" status="${at(p.status)}" subtotal_centavos="${p.subtotal_centavos}" taxa_entrega_centavos="${p.taxa_entrega_centavos}" total_centavos="${p.total_centavos}"/>`);
@@ -390,6 +398,11 @@ function gerarXmlMensal(nomeLoja, { rel, pedidos, lancamentos, insumos }) {
     linhas.push(`    <lancamento data="${at(i.data)}" tipo="insumo" descricao="${at(`${i.nome} (${qtd})`)}" valor_centavos="${i.custo_total_centavos}"/>`);
   }
   linhas.push('  </lancamentos>');
+  linhas.push('  <pagamentos_motoboy>');
+  for (const pg of (motoboyPagamentos || [])) {
+    linhas.push(`    <pagamento data="${at(dataHoraLocal(pg.created_at))}" motoboy="${at(pg.motoboy_nome || '')}" modelo="${at(pg.modelo)}" valor_centavos="${pg.valor_centavos}"/>`);
+  }
+  linhas.push('  </pagamentos_motoboy>');
   linhas.push('  <por_pagamento>');
   for (const f of rel.por_pagamento) {
     linhas.push(`    <forma nome="${at(f.forma)}" qtd="${f.qtd}" total_centavos="${f.total_centavos}"/>`);
@@ -519,6 +532,7 @@ function gerarPdfRelatorio(resumo, lojaInfo, res) {
   linha('Investimento', fmtMoeda(fin.investimento_manual));
   linha('Insumos', fmtMoeda(fin.insumos_total));
   linha('Despesas', fmtMoeda(fin.despesas));
+  linha('Motoboys', fmtMoeda(fin.motoboy_total));
   linha('Custo total', fmtMoeda(fin.custo_total));
   doc.moveDown(0.3);
   doc.font('Helvetica-Bold').fontSize(15).fillColor(PDF_PRETO)
@@ -598,6 +612,7 @@ function gerarPdfRelatorioMensal(rel, lojaInfo, res) {
   linha('Investimento', fmtMoeda(fin.investimento_manual));
   linha('Insumos', fmtMoeda(fin.insumos_total));
   linha('Despesas', fmtMoeda(fin.despesas));
+  linha('Motoboys', fmtMoeda(fin.motoboy_total));
   linha('Custo total', fmtMoeda(fin.custo_total));
   doc.moveDown(0.3);
   doc.font('Helvetica-Bold').fontSize(13).fillColor(PDF_PRETO)

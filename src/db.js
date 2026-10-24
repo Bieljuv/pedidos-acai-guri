@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   loja_id INTEGER NOT NULL DEFAULT 1,
   nome TEXT NOT NULL, login TEXT UNIQUE NOT NULL,
   senha_hash TEXT NOT NULL, perfil TEXT DEFAULT 'admin', ativo INTEGER DEFAULT 1,
+  modelo_pagamento TEXT DEFAULT 'diaria', valor_entrega_centavos INTEGER DEFAULT 0, valor_diaria_centavos INTEGER DEFAULT 0,
   hora_entrada TEXT, hora_saida TEXT,
   dias_semana TEXT,
   janela_antes_min INTEGER DEFAULT 30, janela_depois_min INTEGER DEFAULT 30
@@ -134,6 +135,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
   troco_para_centavos INTEGER, observacao TEXT,
   motivo_cancelamento TEXT, atualizado_por TEXT,
   codigo_entrega TEXT,
+  motoboy_id INTEGER, motoboy_aceito_em TEXT,
   cupom_codigo TEXT,
   entrega_provedor TEXT, entrega_ext_id TEXT, entrega_status TEXT, entrega_chamada_em TEXT,
   created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
@@ -208,6 +210,19 @@ if (MODO === 'sqlite') {
   // v1.16.14: aviso "vamos fechar em breve" (config da loja).
   try { sq.exec('ALTER TABLE lojas ADD COLUMN aviso_fechar_ativo INTEGER DEFAULT 1'); } catch { /* coluna já existe */ }
   try { sq.exec('ALTER TABLE lojas ADD COLUMN aviso_fechar_minutos INTEGER DEFAULT 30'); } catch { /* coluna já existe */ }
+  // v1.16.20: motoboy do pedido + aceite da entrega.
+  try { sq.exec('ALTER TABLE pedidos ADD COLUMN motoboy_id INTEGER'); } catch { /* coluna já existe */ }
+  try { sq.exec('ALTER TABLE pedidos ADD COLUMN motoboy_aceito_em TEXT'); } catch { /* coluna já existe */ }
+  // v1.16.21: pagamento do motoboy (por entrega ou diária) + registros.
+  try { sq.exec(`ALTER TABLE usuarios ADD COLUMN modelo_pagamento TEXT DEFAULT 'diaria'`); } catch { /* coluna já existe */ }
+  try { sq.exec('ALTER TABLE usuarios ADD COLUMN valor_entrega_centavos INTEGER DEFAULT 0'); } catch { /* coluna já existe */ }
+  try { sq.exec('ALTER TABLE usuarios ADD COLUMN valor_diaria_centavos INTEGER DEFAULT 0'); } catch { /* coluna já existe */ }
+  try { sq.exec(`CREATE TABLE IF NOT EXISTS motoboy_pagamentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL DEFAULT 1,
+    motoboy_id INTEGER NOT NULL, valor_centavos INTEGER NOT NULL DEFAULT 0,
+    modelo TEXT NOT NULL DEFAULT 'por_entrega', entregas_cobertas INTEGER DEFAULT 0,
+    dias_cobertos INTEGER DEFAULT 0, registrado_por TEXT,
+    created_at TEXT DEFAULT (datetime('now')))`); } catch { /* tabela já existe */ }
   // Bancos criados antes da v1.8: jornada do funcionário (Equipe/Ponto) e
   // autoria das transições de pedido. ALTERs idempotentes: se a coluna já
   // existe, o erro é ignorado (a tabela pontos nasce do DDL acima).
@@ -524,6 +539,17 @@ async function init() {
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS cor_destaque TEXT');
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS aviso_fechar_ativo INTEGER DEFAULT 1');
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS aviso_fechar_minutos INTEGER DEFAULT 30');
+  await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motoboy_id INTEGER');
+  await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motoboy_aceito_em TEXT');
+  await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS modelo_pagamento TEXT DEFAULT 'diaria'`);
+  await pool.query('ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS valor_entrega_centavos INTEGER DEFAULT 0');
+  await pool.query('ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS valor_diaria_centavos INTEGER DEFAULT 0');
+  await pool.query(`CREATE TABLE IF NOT EXISTS motoboy_pagamentos (
+    id SERIAL PRIMARY KEY, loja_id INTEGER NOT NULL DEFAULT 1,
+    motoboy_id INTEGER NOT NULL, valor_centavos INTEGER NOT NULL DEFAULT 0,
+    modelo TEXT NOT NULL DEFAULT 'por_entrega', entregas_cobertas INTEGER DEFAULT 0,
+    dias_cobertos INTEGER DEFAULT 0, registrado_por TEXT,
+    created_at TIMESTAMPTZ DEFAULT now())`);
   await pool.query('ALTER TABLE lojas ADD COLUMN IF NOT EXISTS setup_json TEXT');
   await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origem TEXT DEFAULT 'proprio'");
   await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS externo_id TEXT');

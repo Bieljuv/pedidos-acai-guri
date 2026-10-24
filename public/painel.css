@@ -606,6 +606,11 @@ body.perfil-func .menu-item:not([data-view="pedidos"]) { display: none !importan
 .pcard-ifood { display: inline-block; background: #ea1d2c; color: #fff; font-weight: 800; font-size: 11px;
   border-radius: 999px; padding: 2px 9px; margin-top: 4px; letter-spacing: .3px; }
 
+/* Motoboy atribuído no cartão do pedido (v1.16.20) */
+.pcard-moto { display: inline-flex; align-items: center; gap: 4px; background: #1E9E4A; color: #fff; font-weight: 700; font-size: 11px;
+  border-radius: 999px; padding: 2px 9px; margin-top: 4px; }
+.pcard-moto .ic { width: 13px; height: 13px; }
+
 /* Vínculo iFood (v1.16.0) */
 .bloco-vinculo{border:1px solid rgba(127,127,160,.35);border-radius:14px;padding:14px;margin-top:12px}
 .passos-vinculo{margin:8px 0 6px 18px;display:grid;gap:4px;font-size:.86rem;opacity:.85}

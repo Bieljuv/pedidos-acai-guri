@@ -28,6 +28,8 @@ const notif = require('./src/notificacoes');
 const pagamentos = require('./src/pagamentos');
 const comanda = require('./src/comanda');
 const storage = require('./src/storage');
+const tenant = require('./src/tenant');
+const lid = tenant.lojaId; // linha original: loja única, sempre 1
 const eventos = require('./src/eventos');
 
 notif.setTransicaoHandler((id, para, opts) => pedidosCore.transicionar(id, para, opts));
@@ -92,6 +94,12 @@ async function autenticar(req, res, next) {
         /^\/api\/painel\/pedidos\/\d+\/entregas\/despachar$/.test(p)));
     if (!livre) return res.status(403).json({ erro: 'Seu acesso é só à tela de pedidos.' });
   }
+  // Motoboy (v1.16.20): o mundo dele é SÓ a página /motoboy — qualquer
+  // rota do painel responde 403, mesmo digitando o endereço. O pedido
+  // dele chega só por /api/motoboy/* (que exige o perfil motoboy).
+  if (req.usuario.perfil === 'motoboy' && req.path.startsWith('/api/painel')) {
+    return res.status(403).json({ erro: 'Seu acesso é só ao painel do motoboy.' });
+  }
   req.token = token;
   next();
 }
@@ -102,6 +110,14 @@ const auth = h(autenticar);
 function soAdmin(req, res, next) {
   if (!req.usuario || req.usuario.perfil !== 'admin') {
     return res.status(403).json({ erro: 'Sem permissão: esta área é só do administrador.' });
+  }
+  next();
+}
+// Motoboy (v1.16.20): só o perfil 'motoboy' abre /api/motoboy/*.
+// (A linha original não tem /dono nem soDono — só o motoboy entra aqui.)
+function soMotoboy(req, res, next) {
+  if (!req.usuario || req.usuario.perfil !== 'motoboy') {
+    return res.status(403).json({ erro: 'Esta área é só do motoboy.' });
   }
   next();
 }
@@ -333,7 +349,7 @@ app.post('/api/webhooks/entregas/99', async (req, res) => {
 
 // ---------------- Painel: pedidos ----------------
 app.get('/api/painel/pedidos', auth, h(async (req, res) => {
-  const lista = await all("SELECT * FROM pedidos WHERE loja_id=1 AND date(created_at,'localtime')=date('now','localtime') ORDER BY id DESC");
+  const lista = await all(`SELECT p.*, u.nome AS motoboy_nome FROM pedidos p LEFT JOIN usuarios u ON u.id = p.motoboy_id WHERE p.loja_id=1 AND date(p.created_at,'localtime')=date('now','localtime') ORDER BY p.id DESC`);
   const saida = [];
   for (const p of lista) saida.push({ ...p, itens: await pedidosCore.getItensPedido(p.id) });
   res.json(saida);
@@ -565,6 +581,204 @@ app.post('/api/painel/upload', auth, soAdmin, upload.single('arquivo'), async (r
   }
 });
 
+// ---------------- Motoboy (v1.16.20) ----------------
+// O dono cadastra o motoboy (login + senha próprios) e atribui o pedido
+// de entrega a ele. O motoboy entra em /motoboy e vê SÓ os pedidos
+// direcionados a ele: aceita a entrega, confirma o recebimento (vira
+// SAIU_ENTREGA pro cliente na hora) e dá baixa com o código do cliente.
+// Cada passo grava "Motoboy <nome>" no histórico do pedido.
+app.post('/api/motoboy/login', h(async (req, res) => {
+  const { login, senha } = req.body || {};
+  const chaveLogin = limite.ipDe(req) + '|mb|' + String(login || '').toLowerCase();
+  if (limite.bloqueado(chaveLogin, 10, 15 * 60 * 1000)) {
+    return res.status(429).json({ erro: 'Muitas tentativas de login. Aguarde alguns minutos e tente de novo.' });
+  }
+  const u = await get(`SELECT * FROM usuarios WHERE login=? AND ativo=1 AND perfil='motoboy' AND loja_id=${lid()}`, String(login || ''));
+  if (!u || !util.verificaSenha(senha || '', u.senha_hash)) {
+    limite.falhou(chaveLogin);
+    return res.status(401).json({ erro: 'Login ou senha inválidos.' });
+  }
+  limite.limparFalhas(chaveLogin);
+  const token = util.tokenAleatorio(24);
+  const expiraEm = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+  await run('INSERT INTO sessoes (token, usuario_id, expira_em) VALUES (?, ?, ?)', token, u.id, expiraEm);
+  res.json({ token, nome: u.nome });
+}));
+// Serializer do motoboy: pedido COMPLETO menos o que ele não pode ver
+// antes da hora — o código de entrega NUNCA vai para o motoboy (é o
+// cliente quem informa na entrega).
+async function pedidoParaMotoboy(p) {
+  const itens = await pedidosCore.getItensPedido(p.id);
+  let endereco = null;
+  try { endereco = p.endereco_json ? JSON.parse(p.endereco_json) : null; } catch { endereco = null; }
+  return {
+    id: p.id, numero: p.numero, status: p.status, tipo: p.tipo,
+    cliente_nome: p.cliente_nome, cliente_whatsapp: p.cliente_whatsapp,
+    endereco, bairro: p.bairro_nome || p.bairro || null,
+    itens, observacao: p.observacao || null,
+    subtotal_centavos: p.subtotal_centavos, taxa_entrega_centavos: p.taxa_entrega_centavos,
+    desconto_centavos: p.desconto_centavos, total_centavos: p.total_centavos,
+    forma_pagamento: p.forma_pagamento, troco_para_centavos: p.troco_para_centavos,
+    motoboy_aceito_em: p.motoboy_aceito_em || null, created_at: p.created_at,
+  };
+}
+async function pedidoDoMotoboy(req, id) {
+  const p = await pedidosCore.getPedido(Number(id));
+  if (!p) return { erro: 'Pedido não encontrado.', status: 404 };
+  if (Number(p.motoboy_id) !== Number(req.usuario.id)) return { erro: 'Este pedido não é seu.', status: 403 };
+  return { pedido: p };
+}
+app.get('/api/motoboy/pedidos', auth, soMotoboy, h(async (req, res) => {
+  const lista = await all(`SELECT * FROM pedidos WHERE loja_id=${lid()} AND motoboy_id=? AND tipo='entrega' AND status NOT IN ('ENTREGUE','CANCELADO') ORDER BY id ASC`, req.usuario.id);
+  const saida = [];
+  for (const p of lista) saida.push(await pedidoParaMotoboy(p));
+  res.json(saida);
+}));
+app.post('/api/motoboy/pedidos/:id/aceitar', auth, soMotoboy, h(async (req, res) => {
+  const { pedido, erro, status } = await pedidoDoMotoboy(req, req.params.id);
+  if (erro) return res.status(status).json({ erro });
+  if (['ENTREGUE', 'CANCELADO'].includes(pedido.status)) return res.status(422).json({ erro: 'Este pedido já foi finalizado.' });
+  if (pedido.motoboy_aceito_em) return res.json({ ok: true });
+  await run(`UPDATE pedidos SET motoboy_aceito_em=datetime('now') WHERE id=?`, pedido.id);
+  await run('INSERT INTO pedido_status_historico (pedido_id, de_status, para_status, origem, motivo, autor) VALUES (?, ?, ?, ?, ?, ?)', pedido.id, pedido.status, pedido.status, 'motoboy', 'Motoboy aceitou a entrega', `Motoboy ${req.usuario.nome}`);
+  res.json({ ok: true });
+}));
+app.post('/api/motoboy/pedidos/:id/receber', auth, soMotoboy, h(async (req, res) => {
+  const { pedido, erro, status } = await pedidoDoMotoboy(req, req.params.id);
+  if (erro) return res.status(status).json({ erro });
+  if (!pedido.motoboy_aceito_em) return res.status(422).json({ erro: 'Aceite a entrega primeiro.' });
+  const r = await pedidosCore.transicionar(pedido.id, 'SAIU_ENTREGA', { origem: 'motoboy', autor: `Motoboy ${req.usuario.nome}` });
+  if (r.erro) return res.status(422).json({ erro: r.erro });
+  res.json({ ok: true, status: 'SAIU_ENTREGA' });
+}));
+app.post('/api/motoboy/pedidos/:id/entregar', auth, soMotoboy, h(async (req, res) => {
+  const { pedido, erro, status } = await pedidoDoMotoboy(req, req.params.id);
+  if (erro) return res.status(status).json({ erro });
+  const r = await pedidosCore.transicionar(pedido.id, 'ENTREGUE', { origem: 'motoboy', autor: `Motoboy ${req.usuario.nome}`, codigoEntrega: String((req.body || {}).codigo || '') });
+  if (r.erro) return res.status(422).json({ erro: r.erro });
+  res.json({ ok: true, status: 'ENTREGUE' });
+}));
+// Configurações do motoboy (v1.16.20): ele só pode trocar a própria
+// senha. Sons ficam no aparelho dele (a página guarda a preferência).
+app.post('/api/motoboy/senha', auth, soMotoboy, h(async (req, res) => {
+  const { atual, nova } = req.body || {};
+  const u = await get('SELECT senha_hash FROM usuarios WHERE id=?', req.usuario.id);
+  if (!u || !util.verificaSenha(atual || '', u.senha_hash)) return res.status(401).json({ erro: 'Senha atual incorreta.' });
+  if (!nova || String(nova).length < 4) return res.status(422).json({ erro: 'A senha nova precisa ter pelo menos 4 caracteres.' });
+  await run('UPDATE usuarios SET senha_hash=? WHERE id=?', util.hashSenha(String(nova)), req.usuario.id);
+  res.json({ ok: true });
+}));
+// Cadastro de motoboys pelo dono (só admin).
+app.get('/api/painel/motoboys', auth, soAdmin, h(async (req, res) => {
+  res.json(await all(`SELECT id, nome, login, ativo, modelo_pagamento, valor_entrega_centavos, valor_diaria_centavos FROM usuarios WHERE loja_id=${lid()} AND perfil='motoboy' ORDER BY nome, id`));
+}));
+app.post('/api/painel/motoboys', auth, soAdmin, h(async (req, res) => {
+  const { nome, login, senha, modelo_pagamento, valor_entrega_centavos, valor_diaria_centavos } = req.body || {};
+  if (!String(nome || '').trim()) return res.status(422).json({ erro: 'Informe o nome do motoboy.' });
+  if (!String(login || '').trim()) return res.status(422).json({ erro: 'Informe o login do motoboy.' });
+  if (!senha || String(senha).length < 4) return res.status(422).json({ erro: 'A senha precisa ter pelo menos 4 caracteres.' });
+  const modelo = modelo_pagamento === 'por_entrega' ? 'por_entrega' : 'diaria';
+  try {
+    const info = await run(`INSERT INTO usuarios (loja_id, nome, login, senha_hash, perfil, ativo, modelo_pagamento, valor_entrega_centavos, valor_diaria_centavos) VALUES (${lid()}, ?, ?, ?, 'motoboy', 1, ?, ?, ?)`, String(nome).trim(), String(login).trim(), util.hashSenha(String(senha)), modelo, Math.max(0, Math.round(Number(valor_entrega_centavos) || 0)), Math.max(0, Math.round(Number(valor_diaria_centavos) || 0)));
+    res.status(201).json({ id: Number(info.lastInsertRowid), nome: String(nome).trim(), login: String(login).trim(), ativo: 1 });
+  } catch (e) {
+    if (/UNIQUE/i.test(String(e.message || e))) return res.status(422).json({ erro: 'Este login já está em uso.' });
+    throw e;
+  }
+}));
+app.patch('/api/painel/motoboys/:id', auth, soAdmin, h(async (req, res) => {
+  const id = Number(req.params.id);
+  const mb = await get(`SELECT * FROM usuarios WHERE id=? AND loja_id=${lid()} AND perfil='motoboy'`, id);
+  if (!mb) return res.status(404).json({ erro: 'Motoboy não encontrado.' });
+  const { nome, login, senha, ativo, modelo_pagamento, valor_entrega_centavos, valor_diaria_centavos } = req.body || {};
+  const sets = [], vals = [];
+  if (nome !== undefined) { sets.push('nome=?'); vals.push(String(nome).trim()); }
+  if (login !== undefined) { sets.push('login=?'); vals.push(String(login).trim()); }
+  if (senha) { sets.push('senha_hash=?'); vals.push(util.hashSenha(String(senha))); }
+  if (ativo !== undefined) { sets.push('ativo=?'); vals.push(ativo ? 1 : 0); }
+  if (modelo_pagamento !== undefined) {
+    if (!['por_entrega', 'diaria'].includes(modelo_pagamento)) return res.status(422).json({ erro: 'Modelo de pagamento inválido.' });
+    sets.push('modelo_pagamento=?'); vals.push(modelo_pagamento);
+  }
+  if (valor_entrega_centavos !== undefined) { sets.push('valor_entrega_centavos=?'); vals.push(Math.max(0, Math.round(Number(valor_entrega_centavos) || 0))); }
+  if (valor_diaria_centavos !== undefined) { sets.push('valor_diaria_centavos=?'); vals.push(Math.max(0, Math.round(Number(valor_diaria_centavos) || 0))); }
+  if (!sets.length) return res.json({ ok: true });
+  try {
+    await run(`UPDATE usuarios SET ${sets.join(',')} WHERE id=?`, ...vals, id);
+  } catch (e) {
+    if (/UNIQUE/i.test(String(e.message || e))) return res.status(422).json({ erro: 'Este login já está em uso.' });
+    throw e;
+  }
+  res.json({ ok: true });
+}));
+// Atribuir (ou remover) o motoboy do pedido. Só entrega, só antes de
+// sair — depois que saiu, o motoboy da entrega não troca mais. Trocar
+// zera o aceite: o novo motoboy precisa aceitar de novo.
+app.patch('/api/painel/pedidos/:id/motoboy', auth, soAdmin, h(async (req, res) => {
+  const p = await pedidosCore.getPedido(Number(req.params.id));
+  if (!p) return res.status(404).json({ erro: 'Pedido não encontrado.' });
+  if (p.tipo !== 'entrega') return res.status(422).json({ erro: 'Motoboy só atende pedido de entrega.' });
+  if (['SAIU_ENTREGA', 'ENTREGUE', 'CANCELADO'].includes(p.status)) return res.status(422).json({ erro: 'Não dá pra trocar o motoboy neste status.' });
+  const motoboyId = (req.body || {}).motoboy_id;
+  let mb = null;
+  if (motoboyId !== null && motoboyId !== undefined) {
+    mb = await get(`SELECT * FROM usuarios WHERE id=? AND loja_id=${lid()} AND perfil='motoboy' AND ativo=1`, Number(motoboyId));
+    if (!mb) return res.status(422).json({ erro: 'Motoboy não encontrado ou inativo.' });
+  }
+  await run('UPDATE pedidos SET motoboy_id=?, motoboy_aceito_em=NULL WHERE id=?', mb ? mb.id : null, p.id);
+  await run('INSERT INTO pedido_status_historico (pedido_id, de_status, para_status, origem, motivo, autor) VALUES (?, ?, ?, ?, ?, ?)', p.id, p.status, p.status, 'painel', mb ? `Motoboy atribuído: ${mb.nome}` : 'Motoboy removido', req.usuario.nome);
+  res.json({ ok: true, motoboy_id: mb ? mb.id : null });
+}));
+
+// ---------------- Financeiro do motoboy (v1.16.21) ----------------
+// O adm define, por motoboy, como ele recebe: por entrega (cada entrega
+// finalizada soma o valor automaticamente) ou diária (cada dia com
+// entrega conta uma diária). O valor usado é o configurado no momento
+// do cálculo. "A receber" = ganho − já pago; o adm confirma o pagamento
+// e o valor passa para "já recebido" no painel do motoboy.
+async function financeiroMotoboy(motoboyId) {
+  const mb = await get(`SELECT id, nome, login, ativo, modelo_pagamento, valor_entrega_centavos, valor_diaria_centavos FROM usuarios WHERE id=? AND loja_id=${lid()} AND perfil='motoboy'`, motoboyId);
+  if (!mb) return null;
+  const modelo = mb.modelo_pagamento === 'por_entrega' ? 'por_entrega' : 'diaria';
+  const entregas = await get(`SELECT COUNT(*) AS n FROM pedidos WHERE loja_id=${lid()} AND motoboy_id=? AND status='ENTREGUE'`, motoboyId);
+  const dias = await get(`SELECT COUNT(DISTINCT date(updated_at,'localtime')) AS n FROM pedidos WHERE loja_id=${lid()} AND motoboy_id=? AND status='ENTREGUE'`, motoboyId);
+  const pagos = await get(`SELECT COALESCE(SUM(valor_centavos),0) AS t FROM motoboy_pagamentos WHERE loja_id=${lid()} AND motoboy_id=?`, motoboyId);
+  const nEntregas = Number(entregas ? entregas.n : 0);
+  const nDias = Number(dias ? dias.n : 0);
+  const valor = modelo === 'por_entrega' ? Number(mb.valor_entrega_centavos || 0) : Number(mb.valor_diaria_centavos || 0);
+  const base = modelo === 'por_entrega' ? nEntregas : nDias;
+  const ganho = base * valor;
+  const pago = Number(pagos ? pagos.t : 0);
+  return {
+    motoboy: { id: mb.id, nome: mb.nome, login: mb.login, ativo: mb.ativo },
+    modelo, valor_entrega_centavos: Number(mb.valor_entrega_centavos || 0), valor_diaria_centavos: Number(mb.valor_diaria_centavos || 0),
+    entregas_finalizadas: nEntregas, dias_trabalhados: nDias,
+    ganho_centavos: ganho, pago_centavos: pago, a_receber_centavos: Math.max(0, ganho - pago),
+  };
+}
+app.get('/api/painel/motoboys/:id/financeiro', auth, soAdmin, h(async (req, res) => {
+  const fin = await financeiroMotoboy(Number(req.params.id));
+  if (!fin) return res.status(404).json({ erro: 'Motoboy não encontrado.' });
+  const pagamentos = await all(`SELECT id, valor_centavos, modelo, entregas_cobertas, dias_cobertos, registrado_por, created_at FROM motoboy_pagamentos WHERE loja_id=${lid()} AND motoboy_id=? ORDER BY id DESC`, Number(req.params.id));
+  res.json({ ...fin, pagamentos });
+}));
+app.post('/api/painel/motoboys/:id/pagar', auth, soAdmin, h(async (req, res) => {
+  const fin = await financeiroMotoboy(Number(req.params.id));
+  if (!fin) return res.status(404).json({ erro: 'Motoboy não encontrado.' });
+  if (fin.a_receber_centavos <= 0) return res.status(422).json({ erro: 'Não há valor a pagar para este motoboy.' });
+  await run(`INSERT INTO motoboy_pagamentos (loja_id, motoboy_id, valor_centavos, modelo, entregas_cobertas, dias_cobertos, registrado_por) VALUES (${lid()}, ?, ?, ?, ?, ?, ?)`,
+    fin.motoboy.id, fin.a_receber_centavos, fin.modelo,
+    fin.modelo === 'por_entrega' ? fin.entregas_finalizadas : 0,
+    fin.modelo === 'diaria' ? fin.dias_trabalhados : 0,
+    req.usuario.nome);
+  res.json({ ok: true, valor_centavos: fin.a_receber_centavos });
+}));
+app.get('/api/motoboy/financeiro', auth, soMotoboy, h(async (req, res) => {
+  const fin = await financeiroMotoboy(req.usuario.id);
+  const pagamentos = await all(`SELECT id, valor_centavos, modelo, entregas_cobertas, dias_cobertos, registrado_por, created_at FROM motoboy_pagamentos WHERE loja_id=${lid()} AND motoboy_id=? ORDER BY id DESC`, req.usuario.id);
+  res.json({ ...fin, pagamentos });
+}));
+
 // ---------------- Painel: loja ----------------
 app.get('/api/painel/loja', auth, h(async (req, res) => res.json(await pedidosCore.getLoja())));
 app.patch('/api/painel/loja', auth, soAdmin, h(async (req, res) => {
@@ -717,6 +931,7 @@ app.get('/api/painel/relatorio', auth, soAdmin, h(async (req, res) => {
     pedidos_concluidos: concluidos.c,
     cancelados: cancelados.c,
     faturamento_centavos: concluidos.s,
+    motoboy_centavos: (await get(`SELECT COALESCE(SUM(valor_centavos),0) s FROM motoboy_pagamentos WHERE loja_id=${lid()} AND date(created_at,'localtime')=?`, data)).s,
     ticket_medio_centavos: concluidos.c ? Math.round(concluidos.s / concluidos.c) : 0,
     top_produtos: await all(`SELECT pi.nome_snapshot AS nome, SUM(pi.quantidade) AS qtd FROM pedido_itens pi JOIN pedidos p ON p.id=pi.pedido_id WHERE ${diaP} GROUP BY pi.nome_snapshot ORDER BY qtd DESC LIMIT 10`, data),
     top_opcoes: await all(`SELECT po.opcao_nome AS nome, COUNT(*) AS qtd FROM pedido_item_opcoes po JOIN pedido_itens pi ON pi.id=po.pedido_item_id JOIN pedidos p ON p.id=pi.pedido_id WHERE ${diaP} GROUP BY po.opcao_nome ORDER BY qtd DESC LIMIT 10`, data),
@@ -1109,6 +1324,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/painel', (req, res) => {
   const f = path.join(__dirname, 'public', 'painel.html');
   if (fs.existsSync(f)) res.sendFile(f); else res.status(404).send('Painel ainda não construído.');
+});
+app.get('/motoboy', (req, res) => {
+  const f = path.join(__dirname, 'public', 'motoboy.html');
+  if (fs.existsSync(f)) res.sendFile(f); else res.status(404).send('Painel do motoboy ainda não construído.');
 });
 /* Link limpo de acompanhamento (v1.16.17): /pedido/K7M2QX serve a loja e
    o roteador do front abre o acompanhamento — sem #/ no endereco. */

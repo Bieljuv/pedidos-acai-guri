@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Motoboy — Entregas</title>
+<style>
+  /* Painel do motoboy (v1.16.20) — feito pra estrada: tela de celular,
+     botões grandes, só os pedidos direcionados a ele. */
+  :root{ --primary:#7E047D; --primary-hover:#66036A; --deep:#3C0151; --bg:#FBF7FD;
+    --ink:#2A0530; --mut:#6B5570; --linha:#EBDCEF; --card:#fff; --verde:#1E9E4A; --vermelho:#C62828; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);padding-bottom:env(safe-area-inset-bottom)}
+  button{font-family:inherit;cursor:pointer}
+  input{font-family:inherit;font-size:16px;color:var(--ink)}
+  [hidden]{display:none !important}
+  .topo{position:sticky;top:0;z-index:10;background:var(--deep);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px}
+  .topo h1{font-size:18px;flex:1;min-width:0}
+  .topo .quem{font-size:12px;opacity:.85;font-weight:400}
+  .icon-btn{flex:none;width:44px;height:44px;border:0;border-radius:999px;background:rgba(255,255,255,.16);color:#fff;display:flex;align-items:center;justify-content:center}
+  .icon-btn svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .icon-btn:active{background:rgba(255,255,255,.32)}
+  .wrap{max-width:560px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--linha);border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 2px 10px rgba(60,1,81,.06)}
+  .card h2{font-size:17px;margin-bottom:10px}
+  .campo{display:block;margin-bottom:12px}
+  .campo span{display:block;font-size:13px;font-weight:600;margin-bottom:4px}
+  .campo input{width:100%;min-height:48px;border:1.5px solid var(--linha);border-radius:12px;padding:10px 12px;background:#fff}
+  .campo input:focus{outline:none;border-color:var(--primary)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:12px 20px;border:0;border-radius:999px;font-weight:700;font-size:15px}
+  .btn-primario{background:var(--primary);color:#fff;box-shadow:0 3px 10px rgba(60,1,81,.28);width:100%}
+  .btn-primario:active{background:var(--primary-hover)}
+  .btn-verde{background:var(--verde);color:#fff;width:100%}
+  .btn-secundario{background:#fff;color:var(--primary);border:1.5px solid var(--primary);width:100%}
+  .btn-ghost{background:transparent;color:var(--mut);border:0;padding:8px 12px;min-height:36px;font-size:14px}
+  .erro{color:var(--vermelho);font-size:14px;margin-top:8px}
+  .ok{color:var(--verde);font-size:14px;margin-top:8px}
+  .dica{font-size:13px;color:var(--mut)}
+  .ped-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .ped-num{font-size:18px;font-weight:800}
+  .chip{font-size:12px;font-weight:800;border-radius:999px;padding:3px 10px;color:#fff;background:var(--primary)}
+  .chip.saiu{background:var(--verde)}
+  .ped-cliente{font-weight:700;margin-bottom:2px}
+  .ped-end{font-size:14px;color:var(--mut);margin-bottom:10px}
+  .ped-end a{color:var(--primary);font-weight:600}
+  .ped-itens{font-size:14px;margin-bottom:10px}
+  .ped-itens .obs{color:var(--mut);font-size:13px}
+  .ped-totais{border-top:1px dashed var(--linha);padding-top:8px;font-size:14px;margin-bottom:12px}
+  .ped-totais .linha{display:flex;justify-content:space-between;margin-bottom:2px}
+  .ped-totais .total{font-weight:800;font-size:16px}
+  .troco-box{background:#FFF7E6;border:1px solid #F5D98B;border-radius:10px;padding:8px 10px;font-size:14px;margin-bottom:12px}
+  .ped-acao{display:grid;gap:8px}
+  .codigo-row{display:flex;gap:8px}
+  .codigo-row input{flex:1;min-height:48px;border:1.5px solid var(--linha);border-radius:12px;padding:10px 12px;font-size:20px;font-weight:800;letter-spacing:.3em;text-align:center}
+  .codigo-row input:focus{outline:none;border-color:var(--primary)}
+  .fin-linha{display:flex;justify-content:space-between;font-size:15px;padding:8px 0;border-bottom:1px dashed var(--linha)}
+  .fin-linha.total{font-weight:800;font-size:17px;border-bottom:0}
+  .fin-pag{display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-bottom:1px solid var(--linha)}
+  .fin-pag .dica{font-size:12px}
+  .chk{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--linha);font-size:15px}
+  .chk input{width:22px;height:22px;accent-color:var(--primary)}
+  .vazio{text-align:center;padding:32px 16px;color:var(--mut)}
+  .vazio .big{font-size:40px;margin-bottom:8px}
+</style>
+</head>
+<body>
+<header class="topo" id="topo" hidden>
+  <h1>Minhas entregas <span class="quem" id="topoQuem"></span></h1>
+  <button class="icon-btn" id="btnSom" type="button" aria-label="Som ligado ou desligado"></button>
+  <button class="icon-btn" id="btnFinanceiro" type="button" aria-label="Financeiro">
+    <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>
+  </button>
+  <button class="icon-btn" id="btnConfig" type="button" aria-label="Configurações">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+  <button class="icon-btn" id="btnSair" type="button" aria-label="Sair">
+    <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+  </button>
+</header>
+
+<main class="wrap">
+  <!-- Login -->
+  <section class="card" id="viewLogin">
+    <h2>Entrar — Motoboy</h2>
+    <p class="dica" style="margin-bottom:12px">Use o login e a senha que a loja cadastrou para você.</p>
+    <form id="formLogin">
+      <label class="campo"><span>Login</span><input id="loginUser" autocomplete="username" required></label>
+      <label class="campo"><span>Senha</span><input id="loginPass" type="password" autocomplete="current-password" required></label>
+      <button class="btn btn-primario" type="submit">Entrar</button>
+      <p class="erro" id="loginErro" hidden></p>
+    </form>
+  </section>
+
+  <!-- Pedidos -->
+  <section id="viewPedidos" hidden>
+    <div id="listaPedidos"></div>
+    <p class="dica" id="atualizadoEm" style="text-align:center"></p>
+  </section>
+
+  <!-- Financeiro (v1.16.21) -->
+  <section class="card" id="viewFinanceiro" hidden>
+    <h2>Financeiro</h2>
+    <p class="dica" id="finModelo" style="margin-bottom:12px"></p>
+    <div id="finTotais"></div>
+    <div id="finPagamentos" style="margin-top:12px"></div>
+    <button class="btn btn-secundario" id="btnVoltarPedidosFin" type="button" style="margin-top:16px">Voltar para as entregas</button>
+  </section>
+
+  <!-- Configurações: SÓ senha e sons (v1.16.20) -->
+  <section class="card" id="viewConfig" hidden>
+    <h2>Configurações</h2>
+    <form id="formSenha">
+      <label class="campo"><span>Senha atual</span><input id="senhaAtual" type="password" autocomplete="current-password" required></label>
+      <label class="campo"><span>Senha nova</span><input id="senhaNova" type="password" autocomplete="new-password" required></label>
+      <label class="campo"><span>Confirmar senha nova</span><input id="senhaConf" type="password" autocomplete="new-password" required></label>
+      <button class="btn btn-primario" type="submit">Salvar senha</button>
+      <p class="erro" id="senhaErro" hidden></p>
+      <p class="ok" id="senhaOk" hidden>Senha alterada.</p>
+    </form>
+    <h2 style="margin-top:24px">Sons</h2>
+    <label class="chk"><input type="checkbox" id="chkSomRec"> Som ao receber um pedido</label>
+    <label class="chk"><input type="checkbox" id="chkSomSaiu"> Som ao sair para entrega</label>
+    <p class="dica">Os sons só tocam depois do primeiro toque na tela (regra do navegador).</p>
+    <button class="btn btn-secundario" id="btnVoltarPedidos" type="button" style="margin-top:16px">Voltar para as entregas</button>
+  </section>
+</main>
+<script src="/motoboy.js"></script>
+</body>
+</html>

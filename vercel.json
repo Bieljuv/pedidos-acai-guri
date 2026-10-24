@@ -10,6 +10,10 @@
     },
     {
       "destination": "/api/index.js",
+      "source": "/motoboy"
+    },
+    {
+      "destination": "/api/index.js",
       "source": "/pedido/(.*)"
     },
     {

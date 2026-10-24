@@ -58,7 +58,7 @@ const state = {
   categorias: [], produtos: [], grupos: [], bairros: [],
   recebimentos: {}, configuracoes: null,
   relData: '', relMes: '', finData: '', finTipoSel: 'investimento', finEditandoId: null, finCalculo: null,
-  equipe: [], pontoMes: '', ponto: null,
+  equipe: [], pontoMes: '', ponto: null, motoboys: [],
   view: 'pedidos',
   audioCtx: null, somAtivo: false, somTimer: null,
   sse: null, pollTimer: null, pontoTimer: null, alertaSilenciado: false,
@@ -251,7 +251,7 @@ const TITULOS = {
   'rec-presencial': 'Meios de Recebimento — Presencial', 'rec-mp': 'Meios de Recebimento — Mercado Pago',
   'rec-asaas': 'Meios de Recebimento — Asaas', loja: 'Loja e Aparência', relatorio: 'Relatório do Dia',
   contabil: 'Contábil', financeiro: 'Financeiro', fidelidade: 'Fidelidade', configuracoes: 'Configurações', equipe: 'Equipe',
-  'primeiros-passos': 'Primeiros Passos',
+  'primeiros-passos': 'Primeiros Passos', motoboys: 'Motoboys',
 };
 function irPara(view) {
   state.view = view;
@@ -272,6 +272,7 @@ function irPara(view) {
   if (view === 'fidelidade') carregarFidelidade();
   if (view === 'configuracoes') carregarConfiguracoes();
   if (view === 'equipe') { carregarEquipe(); carregarPontoRelatorio(); carregarRecuperacao(); }
+  if (view === 'motoboys') carregarMotoboys();
   if (view === 'primeiros-passos') carregarPassos();
 }
 $$('.menu-item[data-view]').forEach(b => b.addEventListener('click', () => {
@@ -555,6 +556,7 @@ function renderBoard() {
           <div class="pcard-itens">${esc(resumoItens(p))}</div>
           ${p.codigo_entrega && ativo ? `<div class="pcard-pin">${ic('chave')} PIN ${esc(p.codigo_entrega)}</div>` : ''}
           ${p.origem === 'ifood' ? '<div class="pcard-ifood">iFood</div>' : ''}
+          ${p.motoboy_nome ? `<div class="pcard-moto">${ic('moto')} ${esc(p.motoboy_nome)}</div>` : ''}
           <div class="pcard-bottom"><span class="pcard-total">${fmtBRL(p.total_centavos)}</span><span class="selos">${selosPedido(p)}</span></div>
         </article>`;
       }).join('') || '<div class="dica" style="text-align:center;padding:.6rem">—</div>') + '</div>';
@@ -623,6 +625,31 @@ async function abrirDetalhe(id, silencioso = false) {
     const acoes = transicoesDo(p).map((t, i) => `<button class="btn ${t.cls}" data-trans="${i}">${t.rotulo}</button>`).join('');
     const codigoBox = p.codigo_entrega
       ? `<div class="codigo-box"><span class="codigo-rot">${ic('chave')} Código de entrega</span><strong class="codigo-num">${esc(p.codigo_entrega)}</strong><span class="codigo-dica">Peça ao cliente na entrega${p.tipo === 'retirada' ? ' (no balcão)' : ''} — a baixa do pedido exige este código.</span></div>` : '';
+    // Motoboy (v1.16.20): atribuir quem entrega — só pedido de entrega,
+    // só antes de sair. Funcionário não carrega a lista (403) e não vê a seção.
+    let motoboyBox = '';
+    if (p.tipo === 'entrega' && !['ENTREGUE', 'CANCELADO'].includes(p.status)) {
+      let listaMb = null;
+      try { listaMb = await api('/api/painel/motoboys'); } catch { listaMb = null; }
+      if (listaMb) {
+        const mbAtual = listaMb.find(m => m.id === Number(p.motoboy_id));
+        if (p.status === 'SAIU_ENTREGA') {
+          motoboyBox = `<div class="det-secao"><h5>Motoboy</h5><p>${mbAtual ? `A caminho com <strong>${esc(mbAtual.nome)}</strong>` : 'Sem motoboy'} — não dá pra trocar depois que saiu.</p></div>`;
+        } else {
+          motoboyBox = `<div class="det-secao"><h5>Motoboy</h5>
+            <p class="dica">Quem vai entregar este pedido? O motoboy vê só os pedidos dele.</p>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.4rem">
+              <select id="selMotoboy" style="flex:1;min-width:160px">
+                <option value="">Sem motoboy</option>
+                ${listaMb.filter(m => m.ativo).map(m => `<option value="${m.id}" ${Number(p.motoboy_id) === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('')}
+              </select>
+              <button class="btn btn-primary" id="btnAtribuirMotoboy">Atribuir</button>
+            </div>
+            ${p.motoboy_id ? `<p class="dica" style="margin-top:.4rem">${p.motoboy_aceito_em ? 'Motoboy já aceitou a entrega.' : 'Aguardando o motoboy aceitar.'}</p>` : ''}
+          </div>`;
+        }
+      }
+    }
     const podeDespachar99 = p.tipo === 'entrega' && ['EM_PREPARO', 'PRONTO'].includes(p.status);
     const entregasBox = p.tipo === 'entrega' ? `
       <div class="det-secao"><h5>Entrega 99</h5>
@@ -647,6 +674,7 @@ async function abrirDetalhe(id, silencioso = false) {
         ${p.tipo === 'entrega' ? `<p>${ic('pin')} ${esc(end)}${ref ? `<br>Referência: <strong>${esc(ref)}</strong>` : ''}${p.bairro ? `<br>Bairro: ${esc(p.bairro)}` : ''}</p>` : `<p>${ic('loja')} Retirada na loja</p>`}
       </div>
       ${entregasBox}
+      ${motoboyBox}
       <div class="det-secao"><h5>Pagamento</h5>
         <div class="det-totais">
           <div class="linha"><span>Subtotal</span><span>${fmtBRL(p.subtotal_centavos)}</span></div>
@@ -672,6 +700,15 @@ async function abrirDetalhe(id, silencioso = false) {
     }));
     const b99 = $('#btnDespachar99');
     if (b99) b99.addEventListener('click', () => despacharEntrega99(p));
+    const bMb = $('#btnAtribuirMotoboy');
+    if (bMb) bMb.addEventListener('click', async () => {
+      const v = $('#selMotoboy').value;
+      try {
+        await api('/api/painel/pedidos/' + p.id + '/motoboy', { method: 'PATCH', body: { motoboy_id: v ? Number(v) : null } });
+        toast('Motoboy atualizado.');
+        abrirDetalhe(p.id, true);
+      } catch (err) { toast(err.message, true); }
+    });
     $$('#drawerBody [data-ent-consultar]').forEach(b => b.addEventListener('click', () => acaoEntrega99('consultar', b.dataset.entConsultar, p)));
     $$('#drawerBody [data-ent-cancelar]').forEach(b => b.addEventListener('click', () => acaoEntrega99('cancelar', b.dataset.entCancelar, p)));
     $('#btnImprimir').addEventListener('click', () => imprimirComanda(p.id));
@@ -1557,7 +1594,8 @@ async function carregarRelatorioDia() {
       <div class="rel-card fin-vendas"><div class="num">${r.pedidos_concluidos ?? 0}</div><div class="rot">Pedidos concluídos</div></div>
       <div class="rel-card fin-despesas"><div class="num">${r.cancelados ?? 0}</div><div class="rot">Cancelados</div></div>
       <div class="rel-card fin-receitas"><div class="num">${fmtBRL(r.faturamento_centavos)}</div><div class="rot">Faturamento do dia</div></div>
-      <div class="rel-card fin-insumos"><div class="num">${fmtBRL(r.ticket_medio_centavos)}</div><div class="rot">Ticket médio</div></div>`;
+      <div class="rel-card fin-insumos"><div class="num">${fmtBRL(r.ticket_medio_centavos)}</div><div class="rot">Ticket médio</div></div>
+      <div class="rel-card fin-despesas"><div class="num">${fmtBRL(r.motoboy_centavos)}</div><div class="rot">Gasto com motoboys</div></div>`;
     const lista = (arr, vazio) => (arr && arr.length)
       ? arr.map(x => `<div class="rel-linha"><span>${esc(x.nome)}</span><strong>${x.qtd ?? x.quantidade ?? ''}</strong></div>`).join('')
       : `<p class="dica">${vazio}</p>`;
@@ -1622,6 +1660,7 @@ async function carregarRelatorioMes() {
       <div class="rel-card fin-insumos"><div class="num">${fmtBRL(t.ticket_medio_centavos)}</div><div class="rot">Ticket médio</div></div>
       <div class="rel-card fin-insumos"><div class="num">${fmtBRL(f.insumos_total)}</div><div class="rot"><span class="dot dot-azul"></span> Insumos</div></div>
       <div class="rel-card fin-despesas"><div class="num">${fmtBRL(f.despesas)}</div><div class="rot"><span class="dot dot-vermelho"></span> Despesas</div></div>
+      <div class="rel-card fin-despesas"><div class="num">${fmtBRL(f.motoboy_total)}</div><div class="rot"><span class="dot dot-vermelho"></span> Motoboys</div></div>
       <div class="rel-card fin-investimento"><div class="num">${fmtBRL(f.investimento_manual)}</div><div class="rot"><span class="dot dot-amarelo"></span> Investimento</div></div>
       <div class="rel-card ${op >= 0 ? 'lucro-pos' : 'lucro-neg'}"><div class="num">${fmtBRL(op)}</div><div class="rot">Lucro das vendas (operacional)</div></div>`;
     const real = Number(f.lucro_real) || 0;
@@ -2142,7 +2181,8 @@ function renderFinCards(c) {
     <div class="rel-card destaque-card fin-acumulada"><div class="num">${fmtBRL(c.receita_total)}</div><div class="rot">Receita acumulada (vendas + manual)</div></div>
     <div class="rel-card fin-investimento"><div class="num">${fmtBRL(c.investimento_manual)}</div><div class="rot"><span class="dot dot-amarelo"></span> Investimento</div></div>
     <div class="rel-card fin-insumos"><div class="num">${fmtBRL(c.insumos_total)}</div><div class="rot"><span class="dot dot-azul"></span> Insumos</div></div>
-    <div class="rel-card fin-despesas"><div class="num">${fmtBRL(c.despesas)}</div><div class="rot"><span class="dot dot-vermelho"></span> Despesas</div></div>`;
+    <div class="rel-card fin-despesas"><div class="num">${fmtBRL(c.despesas)}</div><div class="rot"><span class="dot dot-vermelho"></span> Despesas</div></div>
+    <div class="rel-card fin-despesas"><div class="num">${fmtBRL(c.motoboy_total)}</div><div class="rot"><span class="dot dot-vermelho"></span> Motoboys</div></div>`;
   const lucro = Number(c.lucro_real) || 0;
   const op = Number(c.lucro_operacional_centavos) || 0;
   $('#finLucroCard').innerHTML = `
@@ -2150,11 +2190,11 @@ function renderFinCards(c) {
       <div>
         <div class="rot">${lucro >= 0 ? ic('checkCirculo') : ic('alerta')} LUCRO REAL DO DIA ${fmtDataBR(state.finData)}</div>
         <div class="num">${fmtBRL(lucro)}</div>
-        <div class="sub">Receita acumulada ${fmtBRL(c.receita_total)} − custos ${fmtBRL(c.custo_total)} (investimento + insumos + despesas)</div>
+        <div class="sub">Receita acumulada ${fmtBRL(c.receita_total)} − custos ${fmtBRL(c.custo_total)} (investimento + insumos + despesas + motoboys)</div>
       </div>
       <div class="sub">${c.pedidos_concluidos ?? 0} pedido(s) concluído(s) · ${c.copos ?? 0} copo(s)/item(ns) vendido(s)</div>
     </div>
-    <div class="fin-lucro-op ${op >= 0 ? 'pos' : 'neg'}"><span>Lucro das vendas (operacional): <strong>${fmtBRL(op)}</strong></span><span class="sub">receita − insumos − despesas, <strong>sem</strong> contar o investimento — é o lucro da operação em si</span></div>`;
+    <div class="fin-lucro-op ${op >= 0 ? 'pos' : 'neg'}"><span>Lucro das vendas (operacional): <strong>${fmtBRL(op)}</strong></span><span class="sub">receita − insumos − despesas − motoboys, <strong>sem</strong> contar o investimento — é o lucro da operação em si</span></div>`;
 }
 function renderFinResultado(c) {
   const box = $('#finResultado');
@@ -3018,6 +3058,140 @@ function modalSenhaFuncionario(f) {
     } catch (err) { toast(err.message, true); }
   });
 }
+
+/* ---------- Motoboys (v1.16.20, admin) ---------- */
+async function carregarMotoboys() {
+  try {
+    state.motoboys = await api('/api/painel/motoboys');
+    renderMotoboys();
+  } catch (err) { $('#motoboyList').innerHTML = `<p class="dica">${esc(err.message)}</p>`; }
+}
+function renderMotoboys() {
+  const box = $('#motoboyList');
+  if (!state.motoboys.length) { box.innerHTML = '<p class="dica">Nenhum motoboy cadastrado ainda.</p>'; return; }
+  const reais = (c) => (Number(c || 0) / 100).toFixed(2).replace('.', ',');
+  const paraCentavos = (s) => Math.max(0, Math.round((parseFloat(String(s || '0').replace(',', '.')) || 0) * 100));
+  const pagTxt = (m) => {
+    const v = m.modelo_pagamento === 'por_entrega' ? Number(m.valor_entrega_centavos || 0) : Number(m.valor_diaria_centavos || 0);
+    if (!v) return 'sem valor definido';
+    return (m.modelo_pagamento === 'por_entrega' ? 'Por entrega · ' : 'Diária · ') + fmtBRL(v);
+  };
+  const seta = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  box.innerHTML = state.motoboys.map(m => {
+    let aberto = false;
+    try { aberto = localStorage.getItem('mb_exp_' + m.id) === '1'; } catch { /* sem storage */ }
+    const modelo = m.modelo_pagamento || 'diaria';
+    return `<div class="bloco bloco-exp ${aberto ? 'aberto' : ''}" data-mb="${m.id}">
+      <div class="bloco-head"><h3>${esc(m.nome)} <span class="dica">· ${esc(m.login)}</span></h3>
+        <span class="dica">${pagTxt(m)}</span>
+        <span>${m.ativo ? '<span class="dot dot-verde"></span>' : '<span class="dot dot-vermelho"></span>'}</span>
+        <span class="exp-seta">${seta}</span></div>
+      <div class="bloco-corpo">
+        <label>Como ele recebe
+          <select data-mb-modelo="${m.id}">
+            <option value="por_entrega" ${modelo === 'por_entrega' ? 'selected' : ''}>Por entrega — cada entrega finalizada soma o valor</option>
+            <option value="diaria" ${modelo === 'diaria' ? 'selected' : ''}>Diária — cada dia com entrega conta uma diária</option>
+          </select>
+        </label>
+        <div class="grid-2">
+          <label>Valor por entrega (R$) <input type="text" data-mb-ve="${m.id}" inputmode="decimal" value="${reais(m.valor_entrega_centavos)}" placeholder="0,00"></label>
+          <label>Valor da diária (R$) <input type="text" data-mb-vd="${m.id}" inputmode="decimal" value="${reais(m.valor_diaria_centavos)}" placeholder="0,00"></label>
+        </div>
+        <p class="dica"><strong>Atenção:</strong> o cálculo usa o valor que está configurado no momento — se você mudar o valor no meio do mês, as entregas antigas passam a valer o novo. Defina o valor antes do motoboy começar a rodar.</p>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.6rem">
+          <button class="btn btn-primary btn-sm" data-mb-salvar="${m.id}">Salvar pagamento</button>
+          <button class="btn btn-ghost btn-sm" data-mb-fin="${m.id}">Financeiro</button>
+          <button class="btn btn-ghost btn-sm" data-mb-editar="${m.id}">Editar dados</button>
+          <button class="btn btn-ghost btn-sm" data-mb-toggle="${m.id}">${m.ativo ? 'Desativar' : 'Ativar'}</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  $$('#motoboyList .bloco-exp').forEach(bloco => {
+    const head = bloco.querySelector('.bloco-head');
+    const id = bloco.dataset.mb;
+    head.addEventListener('click', () => {
+      const vai = !bloco.classList.contains('aberto');
+      bloco.classList.toggle('aberto', vai);
+      try { localStorage.setItem('mb_exp_' + id, vai ? '1' : '0'); } catch { /* ok */ }
+    });
+  });
+  $$('#motoboyList [data-mb-salvar]').forEach(b => b.addEventListener('click', async () => {
+    const id = b.dataset.mbSalvar;
+    try {
+      await api('/api/painel/motoboys/' + id, { method: 'PATCH', body: {
+        modelo_pagamento: $(`[data-mb-modelo="${id}"]`).value,
+        valor_entrega_centavos: paraCentavos($(`[data-mb-ve="${id}"]`).value),
+        valor_diaria_centavos: paraCentavos($(`[data-mb-vd="${id}"]`).value),
+      } });
+      toast('Pagamento atualizado.');
+      carregarMotoboys();
+    } catch (err) { toast(err.message, true); }
+  }));
+  $$('#motoboyList [data-mb-toggle]').forEach(b => b.addEventListener('click', async () => {
+    const m = state.motoboys.find(x => String(x.id) === b.dataset.mbToggle);
+    try {
+      await api('/api/painel/motoboys/' + m.id, { method: 'PATCH', body: { ativo: m.ativo ? 0 : 1 } });
+      toast(m.ativo ? `"${m.nome}" desativado — não consegue mais entrar.` : `"${m.nome}" ativado.`);
+      carregarMotoboys();
+    } catch (err) { toast(err.message, true); }
+  }));
+  $$('#motoboyList [data-mb-editar]').forEach(b => b.addEventListener('click', () => modalMotoboy(state.motoboys.find(x => String(x.id) === b.dataset.mbEditar))));
+  $$('#motoboyList [data-mb-fin]').forEach(b => b.addEventListener('click', () => modalFinanceiroMotoboy(state.motoboys.find(x => String(x.id) === b.dataset.mbFin))));
+}
+async function modalFinanceiroMotoboy(m) {
+  const body = openModal('Financeiro — ' + m.nome, '<p class="dica">Carregando…</p>');
+  try {
+    const fin = await api('/api/painel/motoboys/' + m.id + '/financeiro');
+    const valorCfg = fin.modelo === 'por_entrega' ? fin.valor_entrega_centavos : fin.valor_diaria_centavos;
+    body.innerHTML = `
+      <p><strong>${fin.modelo === 'por_entrega' ? 'Por entrega' : 'Diária'}</strong> · ${valorCfg ? fmtBRL(valorCfg) : 'sem valor definido'}</p>
+      <div class="det-totais" style="margin-top:.6rem">
+        <div class="linha"><span>Entregas finalizadas</span><span>${fin.entregas_finalizadas}</span></div>
+        <div class="linha"><span>Dias trabalhados</span><span>${fin.dias_trabalhados}</span></div>
+        <div class="linha"><span>Total ganho</span><span>${fmtBRL(fin.ganho_centavos)}</span></div>
+        <div class="linha"><span>Já pago</span><span>${fmtBRL(fin.pago_centavos)}</span></div>
+        <div class="linha total"><span>A receber</span><span>${fmtBRL(fin.a_receber_centavos)}</span></div>
+      </div>
+      ${fin.pagamentos.length ? `<div class="det-secao"><h5>Pagamentos confirmados</h5>${fin.pagamentos.map(pg => `<div class="hist-item"><span>${fmtBRL(pg.valor_centavos)}${pg.modelo === 'por_entrega' ? ` · ${pg.entregas_cobertas} entregas` : ` · ${pg.dias_cobertos} dias`}${pg.registrado_por ? ` · por ${esc(pg.registrado_por)}` : ''} · ${(dataServidor(pg.created_at) || new Date()).toLocaleDateString('pt-BR')}</span></div>`).join('')}</div>` : '<p class="dica" style="margin-top:.6rem">Nenhum pagamento confirmado ainda.</p>'}
+      <div class="form-actions" style="margin-top:1rem"><button class="btn btn-primary" id="btnPagarMotoboy" ${fin.a_receber_centavos > 0 ? '' : 'disabled'}>Confirmar pagamento de ${fmtBRL(fin.a_receber_centavos)}</button></div>`;
+    const btn = $('#btnPagarMotoboy', body);
+    if (btn) btn.addEventListener('click', async () => {
+      if (!confirm(`Confirmar o pagamento de ${fmtBRL(fin.a_receber_centavos)} para "${m.nome}"? O valor passa para "já recebido" no painel dele.`)) return;
+      try {
+        await api('/api/painel/motoboys/' + m.id + '/pagar', { method: 'POST' });
+        toast('Pagamento confirmado.');
+        closeModal(); modalFinanceiroMotoboy(m); carregarMotoboys();
+      } catch (err) { toast(err.message, true); }
+    });
+  } catch (err) { body.innerHTML = `<p class="dica">${esc(err.message)}</p>`; }
+}
+function modalMotoboy(m) {
+  // O cadastro aqui é só acesso (nome/login/senha). O pagamento mora na
+  // caixa expansível do motoboy na lista (v1.16.22).
+  const body = openModal(m ? 'Editar motoboy' : 'Novo motoboy', `
+    <form id="formMotoboy">
+      <label>Nome <input type="text" id="mbNome" value="${m ? esc(m.nome) : ''}" required></label>
+      <label>Login <input type="text" id="mbLogin" value="${m ? esc(m.login) : ''}" autocomplete="off" required></label>
+      <label>Senha ${m ? '(deixe em branco para manter)' : ''} <input type="password" id="mbSenha" ${m ? '' : 'required'} placeholder="Mínimo 4 caracteres" autocomplete="new-password"></label>
+      <p class="dica">O motoboy entra em <strong>/motoboy</strong> com este login e senha — e vê só os pedidos direcionados a ele. Depois de cadastrar, toque no nome dele na lista para abrir as configurações de pagamento.</p>
+      <div class="form-actions"><button class="btn btn-primary" type="submit">${m ? 'Salvar alterações' : 'Cadastrar motoboy'}</button></div>
+    </form>`);
+  $('#formMotoboy', body).addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const nome = $('#mbNome', body).value.trim();
+    const login = $('#mbLogin', body).value.trim();
+    const senha = $('#mbSenha', body).value;
+    const b = { nome, login };
+    if (senha) b.senha = senha;
+    try {
+      if (m) await api('/api/painel/motoboys/' + m.id, { method: 'PATCH', body: b });
+      else await api('/api/painel/motoboys', { method: 'POST', body: b });
+      closeModal(); toast(m ? 'Motoboy atualizado.' : 'Motoboy cadastrado.'); carregarMotoboys();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+$('#btnNovoMotoboy').addEventListener('click', () => modalMotoboy(null));
 
 /* ----- Ponto do mês (admin) ----- */
 async function carregarPontoRelatorio() {

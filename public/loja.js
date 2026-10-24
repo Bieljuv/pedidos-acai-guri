@@ -287,6 +287,18 @@ function corCabecalho(t) {
 }
 let rolagemPendente = false;
 function atualizarCabecalho() {
+  /* Cabecalho solido no acompanhamento (v1.16.19 — print do Gabriel):
+     no tema claro a pagina de acompanhamento nao tem hero escuro atras
+     — com o cabecalho transparente do topo, o nome branco e o botao
+     "Meu pedido" sumiam no fundo claro. No acompanhamento o fundo e
+     sempre solido, nos dois temas. */
+  if (document.body.classList.contains('hdr-solido')) {
+    hdr.style.setProperty('--hdr-bg', 'rgb(31,4,33)');
+    hdr.style.setProperty('--accop', '1');
+    hdr.classList.add('compacto');
+    rolagemPendente = false;
+    return;
+  }
   const y = window.scrollY || 0;
   let t = Math.min(1, y / 240);
   if (reduzMotion) t = y > 40 ? 1 : 0; // sem interpolação: troca direta ao fixar
@@ -1535,11 +1547,13 @@ function voltarParaLoja() {
 function roteador() {
   const mp = location.pathname.match(/^\/pedido\/(.+)$/);
   const m = mp ? [null, mp[1]] : location.hash.match(/^#\/pedido\/(.+)$/);
+  document.body.classList.toggle('hdr-solido', !!m);
   if (m) {
     $('#view-loja').hidden = true;
     $('#view-pedido').hidden = false;
     renderBarraCarrinho();
     window.scrollTo(0, 0);
+    atualizarCabecalho();
     iniciarAcompanhamento(decodeURIComponent(m[1]));
   } else {
     pararPolling();
@@ -1547,6 +1561,7 @@ function roteador() {
     $('#view-pedido').hidden = true;
     $('#view-loja').hidden = false;
     renderBarraCarrinho();
+    atualizarCabecalho();
   }
 }
 window.addEventListener('hashchange', roteador);

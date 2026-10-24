@@ -23,6 +23,62 @@ async function api(path, opts) {
   return d;
 }
 
+/* ---------- Push (v1.16.24) ---------- */
+// Mesma infra do painel (VAPID): o motoboy ativa no aparelho dele e recebe
+// "novo pedido" e "pedido pronto" mesmo com a página fechada.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/motoboy-sw.js').catch(() => { /* sem SW, sem push — a página segue normal */ });
+}
+function vapidParaBytes(base64) {
+  const pad = '='.repeat((4 - (base64.length % 4)) % 4);
+  const b64 = (base64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+const pushSuportado = 'PushManager' in window && 'serviceWorker' in navigator && 'Notification' in window;
+async function atualizarPushStatus() {
+  const st = $('#pushStatus'), btn = $('#btnPush'), tst = $('#btnPushTeste');
+  if (!st || !btn || !tst) return;
+  if (!pushSuportado) {
+    st.textContent = 'Este aparelho/navegador não suporta notificações.';
+    btn.hidden = true; tst.hidden = true; return;
+  }
+  try {
+    const reg = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+    ]);
+    const sub = await reg.pushManager.getSubscription();
+    if (Notification.permission === 'granted' && sub) {
+      st.textContent = 'Notificações ativas neste aparelho — você recebe aviso de pedido novo e de pedido pronto, mesmo com a página fechada.';
+      btn.hidden = true; tst.hidden = false;
+    } else if (Notification.permission === 'denied') {
+      st.textContent = 'Notificações bloqueadas neste aparelho — libere nas configurações do navegador para ativar.';
+      btn.hidden = true; tst.hidden = true;
+    } else {
+      st.textContent = 'Ative para receber aviso de pedido novo e de pedido pronto, mesmo com a página fechada.';
+      btn.hidden = false; tst.hidden = true;
+    }
+  } catch {
+    st.textContent = 'Não foi possível verificar as notificações neste aparelho.';
+  }
+}
+$('#btnPush').addEventListener('click', async () => {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { atualizarPushStatus(); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const r = await api('/api/motoboy/push/chave');
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidParaBytes(r.chave) });
+    await api('/api/motoboy/push/inscrever', { method: 'POST', body: { subscription: sub.toJSON() } });
+    atualizarPushStatus();
+  } catch (err) { alert('Não foi possível ativar as notificações: ' + err.message); }
+});
+$('#btnPushTeste').addEventListener('click', async () => {
+  try { await api('/api/motoboy/push/testar', { method: 'POST', body: {} }); alert('Teste enviado — deve chegar em segundos.'); }
+  catch (err) { alert(err.message); }
+});
+
 /* ---------- Sons ---------- */
 const somRec = new Audio('/sons/alerta-sis.mp3');
 const somSaiu = new Audio('/sons/moto.mp3');
@@ -41,6 +97,18 @@ function tocar(audio, chave) {
 const SVG_SOM_ON = '<svg viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.4 5.6a9 9 0 0 1 0 12.8"/></svg>';
 const SVG_SOM_OFF = '<svg viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6"/><path d="M16 9l6 6"/></svg>';
 function renderBtnSom() { $('#btnSom').innerHTML = semSom() ? SVG_SOM_OFF : SVG_SOM_ON; }
+/* Som repetindo até aceitar (v1.16.24): enquanto houver pedido sem aceite,
+   o som de recebimento repete a cada 15s — só com a página aberta e o som
+   ligado. Ao aceitar (ou ao sair), para. */
+let somRepeteTimer = null;
+function atualizarSomRepetido(lista) {
+  const pendente = (lista || []).some(p => !p.motoboy_aceito_em);
+  if (pendente && !somRepeteTimer) {
+    somRepeteTimer = setInterval(() => tocar(somRec, 'motoboy_som_recebimento'), 15000);
+  } else if (!pendente && somRepeteTimer) {
+    clearInterval(somRepeteTimer); somRepeteTimer = null;
+  }
+}
 $('#btnSom').addEventListener('click', () => {
   try { localStorage.setItem('motoboy_sem_som', semSom() ? '0' : '1'); } catch { /* sem storage */ }
   renderBtnSom();
@@ -66,6 +134,7 @@ function entrar(t, n) {
 }
 function sair(mensagem) {
   token = null; nome = null; ultimoMapa = {}; primeiraCarga = true;
+  if (somRepeteTimer) { clearInterval(somRepeteTimer); somRepeteTimer = null; }
   try { localStorage.removeItem('motoboy_token'); localStorage.removeItem('motoboy_nome'); } catch { /* sem storage */ }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (mensagem) { $('#loginErro').textContent = mensagem; $('#loginErro').hidden = false; }
@@ -85,6 +154,7 @@ $('#btnConfig').addEventListener('click', () => {
   $('#chkSomSaiu').checked = somOn('motoboy_som_saiu');
   $('#senhaErro').hidden = true; $('#senhaOk').hidden = true;
   mostrar('config');
+  atualizarPushStatus();
 });
 $('#btnVoltarPedidos').addEventListener('click', () => mostrar('pedidos'));
 $('#btnVoltarPedidosFin').addEventListener('click', () => mostrar('pedidos'));
@@ -158,6 +228,7 @@ function acoesHtml(p) {
 }
 function renderPedidos(lista) {
   const box = $('#listaPedidos');
+  atualizarSomRepetido(lista);
   if (!lista.length) {
     box.innerHTML = `<div class="vazio"><p><strong>Nenhuma entrega no momento.</strong></p><p class="dica">Quando a loja direcionar um pedido a você, ele aparece aqui.</p></div>`;
     return;

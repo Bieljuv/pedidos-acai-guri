@@ -125,20 +125,19 @@ async function novoPedido(pedido) {
   } catch (e) { console.error('[push] novoPedido:', e.message); return { enviados: 0 }; }
 }
 
-// Teste do botão no painel: manda só pros aparelhos do usuário logado.
-async function testar(usuarioId) {
-  if (!webpush || !vapid) return { ok: false, erro: 'Push indisponível neste servidor.' };
+// Envia para os aparelhos de UM usuário (teste do painel, motoboy).
+async function enviarParaUsuario(usuarioId, payload) {
+  if (!webpush || !vapid) return { ok: false, enviados: 0, erro: 'Push indisponível neste servidor.' };
   const lista = await all('SELECT * FROM push_inscricoes WHERE usuario_id=?', usuarioId);
-  if (!lista.length) return { ok: false, erro: 'Nenhum aparelho inscrito. Ative as notificações neste aparelho primeiro.' };
+  if (!lista.length) return { ok: false, enviados: 0, erro: 'Nenhum aparelho inscrito.' };
   let enviados = 0;
   for (const ins of lista) {
     let chaves = {};
-    try { chaves = JSON.parse(ins.chaves_json || '{}'); } catch { /* idem */ }
+    try { chaves = JSON.parse(ins.chaves_json || '{}'); } catch { /* inscrição velha */ }
     try {
       await webpush.sendNotification(
         { endpoint: ins.endpoint, keys: { p256dh: chaves.p256dh, auth: chaves.auth } },
-        JSON.stringify({ titulo: 'Teste do painel', corpo: 'As notificações estão funcionando neste aparelho.', url: '/painel', tag: 'teste-push' }),
-        { TTL: 300 });
+        JSON.stringify(payload), { TTL: 3600 });
       enviados++;
     } catch (e) {
       if (e && (e.statusCode === 404 || e.statusCode === 410)) {
@@ -149,4 +148,35 @@ async function testar(usuarioId) {
   return { ok: enviados > 0, enviados, erro: enviados ? undefined : 'O serviço de push recusou o envio. Tente reativar as notificações.' };
 }
 
-module.exports = { preparar, chavePublica, inscrever, desinscrever, enviarParaTodos, novoPedido, testar };
+// Teste do botão no painel: manda só pros aparelhos do usuário logado.
+async function testar(usuarioId) {
+  const r = await enviarParaUsuario(usuarioId, { titulo: 'Teste do painel', corpo: 'As notificações estão funcionando neste aparelho.', url: '/painel', tag: 'teste-push' });
+  if (!r.ok && r.erro === 'Nenhum aparelho inscrito.') return { ok: false, erro: 'Nenhum aparelho inscrito. Ative as notificações neste aparelho primeiro.' };
+  return r;
+}
+
+// Disparos do motoboy (v1.16.24): pedido atribuído a ele + pedido pronto
+// para retirar. Fire-and-forget: falha de push NUNCA trava o pedido.
+async function novoPedidoMotoboy(motoboyId, pedido) {
+  try {
+    const total = ((pedido.total_centavos || 0) / 100).toFixed(2).replace('.', ',');
+    await enviarParaUsuario(motoboyId, {
+      titulo: `Novo pedido #${pedido.numero} pra você`,
+      corpo: `${pedido.cliente_nome || 'Cliente'} — R$ ${total} · Entrega`,
+      url: '/motoboy',
+      tag: `motoboy-pedido-${pedido.id}`,
+    });
+  } catch (e) { console.error('[push] novoPedidoMotoboy:', e.message); }
+}
+async function pedidoProntoMotoboy(motoboyId, pedido) {
+  try {
+    await enviarParaUsuario(motoboyId, {
+      titulo: `Pedido #${pedido.numero} pronto para retirar`,
+      corpo: `${pedido.cliente_nome || 'Cliente'} — pode buscar na loja.`,
+      url: '/motoboy',
+      tag: `motoboy-pronto-${pedido.id}`,
+    });
+  } catch (e) { console.error('[push] pedidoProntoMotoboy:', e.message); }
+}
+
+module.exports = { preparar, chavePublica, inscrever, desinscrever, enviarParaTodos, enviarParaUsuario, novoPedido, novoPedidoMotoboy, pedidoProntoMotoboy, testar };

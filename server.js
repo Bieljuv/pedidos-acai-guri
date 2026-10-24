@@ -388,6 +388,7 @@ app.post('/api/painel/pedidos/:id/transicao', auth, h(async (req, res) => {
     ehAdmin: req.usuario.perfil === 'admin',
   });
   if (!r.ok) return res.status(422).json({ erro: r.erro, codigo: r.codigo || undefined });
+  if (String(para_status) === 'PRONTO' && r.pedido && r.pedido.motoboy_id) pushPainel.pedidoProntoMotoboy(r.pedido.motoboy_id, r.pedido);
   res.json({ ok: true, pedido: r.pedido });
 }));
 // Entregas 99 (v1.9.2 — módulo src/entregadores.js): histórico do pedido,
@@ -727,7 +728,31 @@ app.patch('/api/painel/pedidos/:id/motoboy', auth, soAdmin, h(async (req, res) =
   }
   await run('UPDATE pedidos SET motoboy_id=?, motoboy_aceito_em=NULL WHERE id=?', mb ? mb.id : null, p.id);
   await run('INSERT INTO pedido_status_historico (pedido_id, de_status, para_status, origem, motivo, autor) VALUES (?, ?, ?, ?, ?, ?)', p.id, p.status, p.status, 'painel', mb ? `Motoboy atribuído: ${mb.nome}` : 'Motoboy removido', req.usuario.nome);
+  if (mb) pushPainel.novoPedidoMotoboy(mb.id, p);
   res.json({ ok: true, motoboy_id: mb ? mb.id : null });
+}));
+
+// ---------------- Push do motoboy (v1.16.24) ----------------
+// Mesma infra do painel (VAPID + push_inscricoes, por usuário): o motoboy
+// ativa no aparelho dele e recebe "novo pedido" e "pedido pronto" mesmo
+// com a página fechada.
+app.get('/api/motoboy/push/chave', auth, soMotoboy, (req, res) => {
+  const chave = pushPainel.chavePublica();
+  if (!chave) return res.status(503).json({ erro: 'Push indisponível neste servidor.' });
+  res.json({ chave });
+});
+app.post('/api/motoboy/push/inscrever', auth, soMotoboy, h(async (req, res) => {
+  const r = await pushPainel.inscrever(req.usuario.id, (req.body || {}).subscription, req.headers['user-agent']);
+  if (!r.ok) return res.status(422).json({ erro: r.erro });
+  res.json(r);
+}));
+app.post('/api/motoboy/push/desinscrever', auth, soMotoboy, h(async (req, res) => {
+  res.json(await pushPainel.desinscrever(req.usuario.id, (req.body || {}).endpoint));
+}));
+app.post('/api/motoboy/push/testar', auth, soMotoboy, h(async (req, res) => {
+  const r = await pushPainel.enviarParaUsuario(req.usuario.id, { titulo: 'Teste de notificação', corpo: 'As notificações estão funcionando neste aparelho.', url: '/motoboy', tag: 'teste-push-motoboy' });
+  if (!r.ok) return res.status(422).json({ erro: r.erro || 'Falha no teste.' });
+  res.json(r);
 }));
 
 // ---------------- Financeiro do motoboy (v1.16.21) ----------------

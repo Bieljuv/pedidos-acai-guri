@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/motoboy.webmanifest">
+<meta name="theme-color" content="#3C0151">
 <title>Motoboy — Entregas</title>
 <style>
   /* Painel do motoboy (v1.16.20) — feito pra estrada: tela de celular,
@@ -120,7 +122,11 @@
     <h2 style="margin-top:24px">Sons</h2>
     <label class="chk"><input type="checkbox" id="chkSomRec"> Som ao receber um pedido</label>
     <label class="chk"><input type="checkbox" id="chkSomSaiu"> Som ao sair para entrega</label>
-    <p class="dica">Os sons só tocam depois do primeiro toque na tela (regra do navegador).</p>
+    <p class="dica">Os sons só tocam depois do primeiro toque na tela (regra do navegador). Enquanto houver um pedido sem aceite, o som de recebimento repete a cada 15 segundos.</p>
+    <h2 style="margin-top:24px">Notificações</h2>
+    <p class="dica" id="pushStatus" style="margin-bottom:12px">Verificando…</p>
+    <button class="btn btn-secundario" id="btnPush" type="button">Ativar notificações neste aparelho</button>
+    <button class="btn btn-ghost" id="btnPushTeste" type="button" hidden>Testar notificação</button>
     <button class="btn btn-secundario" id="btnVoltarPedidos" type="button" style="margin-top:16px">Voltar para as entregas</button>
   </section>
 </main>

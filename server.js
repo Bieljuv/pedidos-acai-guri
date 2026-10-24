@@ -1110,6 +1110,12 @@ app.get('/painel', (req, res) => {
   const f = path.join(__dirname, 'public', 'painel.html');
   if (fs.existsSync(f)) res.sendFile(f); else res.status(404).send('Painel ainda não construído.');
 });
+/* Link limpo de acompanhamento (v1.16.17): /pedido/K7M2QX serve a loja e
+   o roteador do front abre o acompanhamento — sem #/ no endereco. */
+app.get('/pedido/*', (req, res) => {
+  const f = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(f)) res.sendFile(f); else res.status(404).send('Loja ainda não construída.');
+});
 app.get('/', (req, res) => {
   const f = path.join(__dirname, 'public', 'index.html');
   if (fs.existsSync(f)) res.sendFile(f); else res.status(404).send('Loja ainda não construída.');

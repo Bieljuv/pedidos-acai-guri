@@ -1,7 +1,7 @@
 'use strict';
 // Núcleo de pedidos: cardápio, cálculo no servidor, criação e máquina de estados.
 const { get, all, run, tx, execSql, modoBanco } = require('./db');
-const { tokenAleatorio, normalizaFone, lojaEstaAberta } = require('./util');
+const { tokenAleatorio, codigoPedido, normalizaFone, lojaEstaAberta } = require('./util');
 // FALTAVA este import (v1.16.3): o ultimoPedidoDoCliente (portado da
 // linha SaaS na v1.14.0) usa lid() e este era o UNICO arquivo que
 // chamava lid() sem importar — ReferenceError em QUALQUER busca do
@@ -207,7 +207,14 @@ async function criarPedido(corpo) {
   }
 
   const numero = loja.proximo_numero;
-  const token = tokenAleatorio();
+  // Codigo curto unico (v1.16.17): tenta ate 5x, senao cai no token longo.
+  let token = null;
+  for (let t = 0; t < 5 && !token; t++) {
+    const cand = codigoPedido();
+    const existe = await get(`SELECT 1 AS um FROM pedidos WHERE loja_id=${lid()} AND token=?`, cand);
+    if (!existe) token = cand;
+  }
+  if (!token) token = tokenAleatorio();
   const codigoEntrega = await gerarCodigoEntrega();
   let pedidoId;
   await tx(async (q) => {

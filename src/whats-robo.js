@@ -173,7 +173,7 @@ async function tratarMensagem({ de, texto, nome, host }) {
     if (ehStatus) {
       const p = await pedidoAtivo(w);
       if (p) {
-        await enviar(w, `Seu pedido *#${p.numero}* está: ${ROTULO_STATUS[p.status] || p.status}.\n\nAcompanhe ao vivo aqui: ${link}/#/pedido/${p.token}`);
+        await enviar(w, `Seu pedido *#${p.numero}* está: ${ROTULO_STATUS[p.status] || p.status}.\n\nAcompanhe ao vivo aqui: ${link}/pedido/${p.token}`);
       } else {
         await enviar(w, 'Você não tem nenhum pedido em andamento agora. 😊\n\nQuer fazer um? É só tocar aqui: ' + link);
       }

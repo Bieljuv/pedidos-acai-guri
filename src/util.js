@@ -4,6 +4,14 @@ const crypto = require('crypto');
 const fmtBRL = (cent) => 'R$ ' + (Number(cent || 0) / 100).toFixed(2).replace('.', ',');
 const agora = () => new Date().toISOString();
 const tokenAleatorio = (bytes = 18) => crypto.randomBytes(bytes).toString('hex');
+/* Codigo curto do pedido (v1.16.17): o link de acompanhamento usa o token
+   do pedido — 36 hex era feio de compartilhar no WhatsApp. Codigo de 6
+   caracteres, sem 0/O/1/I (nao confundem na leitura), sorteado com
+   crypto. Continua ALEATORIO (nao e numero sequencial: numero sequencial
+   deixaria qualquer um enumerar pedidos alheios, e o acompanhamento
+   expoe nome, telefone e endereco). */
+const ALFABETO_CODIGO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const codigoPedido = () => Array.from({ length: 6 }, () => ALFABETO_CODIGO[crypto.randomInt(ALFABETO_CODIGO.length)]).join('');
 
 function hashSenha(senha) {
   const salt = crypto.randomBytes(16);
@@ -79,4 +87,4 @@ function msgCortePedidos(loja) {
   return `Infelizmente já encerramos os pedidos de hoje — a cozinha precisa despachar as últimas entregas antes do fechamento, às ${String(fecha).slice(0, 5)}. Voltamos amanhã às ${String(abre).slice(0, 5)}!`;
 }
 
-module.exports = { fmtBRL, agora, tokenAleatorio, hashSenha, verificaSenha, carregarEnv, soDigitos, normalizaFone, mascarar, ehMascarado, lojaEstaAberta, msgCortePedidos };
+module.exports = { fmtBRL, agora, tokenAleatorio, codigoPedido, hashSenha, verificaSenha, carregarEnv, soDigitos, normalizaFone, mascarar, ehMascarado, lojaEstaAberta, msgCortePedidos };

@@ -138,6 +138,7 @@ const qtdCarrinho = () => carrinho.reduce((s, i) => s + i.quantidade, 0);
 
 /* ---------- Peça de novo (v1.14.0): cliente reconhecido pelo aparelho ---------- */
 let ultimoPedidoCache = null;
+let pdnModo = 'pedir'; // 'pedir' = remonta o carrinho; 'acompanhar' = vai ao acompanhamento
 function mostrarPecaDeNovo(r) {
   ultimoPedidoCache = r;
   $('#pdn-resumo').textContent = 'Seu último pedido: ' +
@@ -163,6 +164,19 @@ async function verificarPecaDeNovo() {
   $('#peca-de-novo').hidden = false;
 }
 $('#btn-pdn-buscar').addEventListener('click', () => {
+  pdnModo = 'pedir';
+  $('#pdn-form').hidden = false;
+  $('#btn-pdn-buscar').hidden = true;
+  $('#pdn-fone').focus();
+});
+/* Acompanhar sempre visivel (v1.16.16): fechar o navegador sem querer
+   nao pode custar o acompanhamento — o botao fica no cardao Peça de
+   novo com a loja ABERTA (com ela fechada, o banner de fechada ja tem
+   o campo). Reconhecido: vai direto; sem reconhecimento: busca pelo
+   WhatsApp, igual ao Buscar meu pedido. */
+$('#btn-pdn-acompanhar').addEventListener('click', () => {
+  if (ultimoPedidoCache && ultimoPedidoCache.token) { irParaAcompanhamento(ultimoPedidoCache.token); return; }
+  pdnModo = 'acompanhar';
   $('#pdn-form').hidden = false;
   $('#btn-pdn-buscar').hidden = true;
   $('#pdn-fone').focus();
@@ -213,6 +227,12 @@ $('#pdn-form').addEventListener('submit', async (e) => {
     try { salvo = JSON.parse(localStorage.getItem('loja_cliente') || '{}'); } catch {}
     salvo.whatsapp = digitos;
     try { localStorage.setItem('loja_cliente', JSON.stringify(salvo)); } catch {}
+    if (pdnModo === 'acompanhar') {
+      if (r.token) { irParaAcompanhamento(r.token); return; }
+      msg.textContent = 'Não achei pedido nesse número por aqui. Confere o número?';
+      msg.hidden = false;
+      return;
+    }
     mostrarPecaDeNovo(r);
   } catch {
     msg.textContent = 'Não consegui buscar agora. Tenta de novo em instantes.';
@@ -542,7 +562,7 @@ function renderLoja() {
       if (dig.length < 12) { toast('Informe seu WhatsApp com DDD.'); return; }
       try {
         const r = await getJSON('/api/public/ultimo-pedido/' + dig);
-        if (r && r.token) location.hash = '#/pedido/' + r.token;
+        if (r && r.token) irParaAcompanhamento(r.token);
         else toast('Não encontramos pedido para este WhatsApp.');
       } catch { toast('Não foi possível buscar agora. Tente de novo.'); }
     };
@@ -1219,7 +1239,7 @@ $('#form-checkout').addEventListener('submit', async (ev) => {
     salvarCarrinho();
     fecharOverlay('checkout');
     toast(`Pedido #${dados.numero} enviado!`);
-    location.hash = '#/pedido/' + dados.token;
+    irParaAcompanhamento(dados.token);
   } catch (e) {
     erroCheckout(e.message || 'Algo deu errado. Seu pedido continua no carrinho — tente de novo.');
   } finally {
@@ -1456,7 +1476,7 @@ function renderAcompanhamento(d) {
     catch { toast('Selecione o código e copie manualmente.'); }
   });
   const btnNovo = $('#btn-novo-pedido');
-  if (btnNovo) btnNovo.addEventListener('click', () => { location.hash = '#/'; });
+  if (btnNovo) btnNovo.addEventListener('click', voltarParaLoja);
   const btnSom = $('#btn-som-acomp');
   if (btnSom) btnSom.addEventListener('click', () => {
     const desligado = !somDesligado();
@@ -1502,8 +1522,19 @@ function iniciarAcompanhamento(token) {
 /* ============================================================
    ROTEADOR (hash)
    ============================================================ */
+/* Navegacao do acompanhamento (v1.16.17): link limpo /pedido/CODIGO.
+   O link antigo #/pedido/... continua funcionando (compat). */
+function irParaAcompanhamento(token) {
+  history.pushState(null, '', '/pedido/' + encodeURIComponent(token));
+  roteador();
+}
+function voltarParaLoja() {
+  history.pushState(null, '', '/');
+  roteador();
+}
 function roteador() {
-  const m = location.hash.match(/^#\/pedido\/(.+)$/);
+  const mp = location.pathname.match(/^\/pedido\/(.+)$/);
+  const m = mp ? [null, mp[1]] : location.hash.match(/^#\/pedido\/(.+)$/);
   if (m) {
     $('#view-loja').hidden = true;
     $('#view-pedido').hidden = false;
@@ -1519,7 +1550,8 @@ function roteador() {
   }
 }
 window.addEventListener('hashchange', roteador);
-$('#btn-voltar-loja').addEventListener('click', () => { location.hash = '#/'; });
+window.addEventListener('popstate', roteador);
+$('#btn-voltar-loja').addEventListener('click', voltarParaLoja);
 
 document.addEventListener('DOMContentLoaded', iniciar);
 

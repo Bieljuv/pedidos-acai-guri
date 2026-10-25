@@ -57,7 +57,8 @@ const state = {
   detalheId: null,
   categorias: [], produtos: [], grupos: [], bairros: [],
   recebimentos: {}, configuracoes: null,
-  relData: '', relMes: '', finData: '', finTipoSel: 'investimento', finEditandoId: null, finCalculo: null,
+  relModo: 'mes', relDe: '', relAte: '', relSegBtn: null, relMes: '', finData: '', finTipoSel: 'investimento', finEditandoId: null, finCalculo: null,
+  hojeAtrasadosVistos: null,
   equipe: [], pontoMes: '', ponto: null, motoboys: [],
   view: 'pedidos',
   audioCtx: null, somAtivo: false, somTimer: null,
@@ -247,9 +248,10 @@ function abrirTrocaSenhaForcada() {
 
 /* ---------- Navegação ---------- */
 const TITULOS = {
+  hoje: 'Hoje',
   pedidos: 'Pedidos', cardapio: 'Cardápio', grupos: 'Grupos e Opções', bairros: 'Bairros e Taxas',
   'rec-presencial': 'Meios de Recebimento — Presencial', 'rec-mp': 'Meios de Recebimento — Mercado Pago',
-  'rec-asaas': 'Meios de Recebimento — Asaas', loja: 'Loja e Aparência', relatorio: 'Relatório do Dia',
+  'rec-asaas': 'Meios de Recebimento — Asaas', loja: 'Loja e Aparência', relatorio: 'Relatório',
   contabil: 'Contábil', financeiro: 'Financeiro', fidelidade: 'Fidelidade', configuracoes: 'Configurações', equipe: 'Equipe',
   'primeiros-passos': 'Primeiros Passos', motoboys: 'Motoboys',
 };
@@ -260,13 +262,14 @@ function irPara(view) {
   const sec = $('#view-' + view);
   if (sec) sec.classList.remove('hidden');
   $('#viewTitle').textContent = TITULOS[view] || view;
+  if (view === 'hoje') carregarHoje();
   if (view === 'pedidos') carregarPedidos();
   if (view === 'cardapio') carregarCardapio();
   if (view === 'grupos') carregarGrupos();
   if (view === 'bairros') carregarBairros();
   if (view.startsWith('rec-')) carregarRecebimentos();
   if (view === 'loja') preencherLoja();
-  if (view === 'relatorio') carregarRelatorioDia();
+  if (view === 'relatorio') carregarRelatorioDash();
   if (view === 'contabil') carregarRelatorioMes();
   if (view === 'financeiro') carregarFinanceiro();
   if (view === 'fidelidade') carregarFidelidade();
@@ -405,7 +408,7 @@ function conectarStream() {
     es.onerror = () => { /* polling cobre */ };
   } catch { /* polling cobre */ }
   if (state.pollTimer) clearInterval(state.pollTimer);
-  state.pollTimer = setInterval(() => { if (state.view === 'pedidos') carregarPedidos(true); }, 10000);
+  state.pollTimer = setInterval(() => { if (state.view === 'pedidos') carregarPedidos(true); carregarHoje(true); }, 10000);
 }
 
 /* ---------- Som de alerta de novo pedido ---------- */
@@ -526,6 +529,137 @@ function classeTempo(min) { return min > 20 ? 'danger' : min > 10 ? 'warn' : '';
 function resumoItens(p) {
   if (Array.isArray(p.itens)) return p.itens.map(it => `${it.quantidade || 1}x ${nomeItem(it)}`).join('\n');
   return p.itens_resumo || p.resumo || '';
+}
+/* ---------- Hoje (v1.16.26): o que precisa de atenção agora ---------- */
+function fmtEspera(min) {
+  if (min < 60) return min + ' min';
+  return Math.floor(min / 60) + 'h' + String(min % 60).padStart(2, '0');
+}
+function hojeLinha(p, prazoTxt) {
+  const min = minutosDesde(p.created_at || p.criado_em);
+  return `<article class="pcard" data-id="${p.id}">
+    <div class="pcard-top"><span class="pcard-num">#${p.numero}</span>
+    <span class="pcard-tempo">${fmtEspera(min)}${prazoTxt ? ' · ' + prazoTxt : ''}</span></div>
+    <div class="pcard-cliente">${esc(p.cliente_nome || 'Cliente')}</div>
+    <div class="pcard-itens">${STATUS_ROTULO[p.status] || p.status}${p.tipo === 'retirada' ? ' · Retirada' : ''}${p.motoboy_nome ? ' · ' + esc(p.motoboy_nome) : ''}</div>
+    <div class="pcard-bottom"><span class="pcard-total">${fmtBRL(p.total_centavos)}</span></div>
+  </article>`;
+}
+/* ---------- Gráficos do dashboard (v1.16.28 — Hoje e Relatório) ---------- */
+function grafBarrasH(itens, cor) { // [{rot, val, suf?}] -> linhas de barra horizontal
+  const max = Math.max(1, ...itens.map(i => i.val));
+  return itens.map(i => `<div class="graf-barra-linha"><span class="graf-barra-rot">${esc(i.rot)}</span>
+    <span class="graf-barra-trilho"><span class="graf-barra-preench ${cor}" style="width:${i.val ? Math.max(4, Math.round(i.val / max * 100)) : 0}%"></span></span>
+    <span class="graf-barra-num">${i.val}${i.suf || ''}</span></div>`).join('');
+}
+function deltaTxt(cur, prev) { // comparativo com o período anterior
+  cur = Number(cur) || 0; prev = Number(prev) || 0;
+  if (!prev) return { txt: 'sem período anterior', cls: '' };
+  const pct = Math.round((cur - prev) / prev * 100);
+  if (pct > 0) return { txt: `▲ +${pct}% vs anterior`, cls: 'up' };
+  if (pct < 0) return { txt: `▼ ${pct}% vs anterior`, cls: 'down' };
+  return { txt: '＝ 0% vs anterior', cls: '' };
+}
+const GRAF_PAG_COR = { pix: '#1d9e57', cartao: '#2563eb', dinheiro: '#e6a700' };
+function grafDonut(pag) { // [{forma, qtd, total_centavos}] -> rosca + legenda (% do valor)
+  const CIRC = 339.3;
+  const total = pag.reduce((s, p) => s + (Number(p.total_centavos) || 0), 0);
+  if (!total) return '<p class="dica">Sem vendas no período.</p>';
+  let acum = 0;
+  const fatias = pag.map(p => {
+    const comp = Math.round(Number(p.total_centavos) / total * CIRC * 10) / 10;
+    const off = -acum; acum += comp;
+    return { ...p, comp, off, pct: Math.round(Number(p.total_centavos) / total * 100) };
+  });
+  const svg = `<svg width="150" height="150" viewBox="0 0 150 150">
+    <circle cx="75" cy="75" r="54" fill="none" stroke="var(--linha)" stroke-width="22"/>
+    ${fatias.map(f => `<circle cx="75" cy="75" r="54" fill="none" stroke="${GRAF_PAG_COR[f.forma] || '#902A88'}" stroke-width="22" stroke-dasharray="${f.comp} ${CIRC}" stroke-dashoffset="${f.off}" transform="rotate(-90 75 75)"/>`).join('')}
+  </svg>`;
+  const leg = fatias.map(f => `<span><i style="background:${GRAF_PAG_COR[f.forma] || '#902A88'}"></i>${esc(FORMA_ROTULO[f.forma] || f.forma)} — ${f.pct}%</span>`).join('');
+  return `<div class="graf-donut-wrap">${svg}<div class="graf-legenda">${leg}</div></div>`;
+}
+function grafDias(dias) { // [{dia, val}] -> barras verticais, rótulo a cada 5 dias + último
+  const max = Math.max(1, ...dias.map(d => d.val));
+  return `<div class="graf-dias">` + dias.map((d, i) => {
+    const rot = (i % 5 === 0 || i === dias.length - 1) ? Number(d.dia.slice(8, 10)) : '';
+    return `<div class="graf-dia-col"><div class="graf-dia-barra" style="height:${d.val ? Math.max(2, Math.round(d.val / max * 100)) : 0}%"></div><span class="graf-dia-rot">${rot}</span></div>`;
+  }).join('') + '</div>';
+}
+async function carregarHoje(silencioso = false) {
+  try {
+    const data = await api('/api/painel/hoje');
+    const lista = Array.isArray(data.pedidos) ? data.pedidos : [];
+    const prep = Number(data.prazo_prep_min) || 20, entr = Number(data.prazo_entrega_min) || 40;
+    const prazo = (p) => (p.tipo === 'retirada' ? prep : prep + entr);
+    // Atrasado = aberto há mais tempo que o prazo da loja; do mais atrasado ao menos.
+    const atrasados = lista.filter(p => minutosDesde(p.created_at) > prazo(p))
+      .sort((a, b) => minutosDesde(b.created_at) - minutosDesde(a.created_at));
+    const emPreparo = lista.filter(p => p.status === 'NOVO' || p.status === 'EM_PREPARO');
+    const aguardando = lista.filter(p => p.status === 'SAIU_ENTREGA');
+    // Alerta de atraso (v1.16.29): a 1ª carga só marca a base, em silêncio;
+    // a partir daí, todo pedido que CRUZA o prazo avisa com som + aviso.
+    const idsAgora = new Set(atrasados.map(p => p.id));
+    if (state.hojeAtrasadosVistos) {
+      const novos = atrasados.filter(p => !state.hojeAtrasadosVistos.has(p.id));
+      if (novos.length && state.view === 'hoje') {
+        bip();
+        toast(novos.length === 1 ? `Pedido #${novos[0].numero} ficou atrasado.` : `${novos.length} pedidos ficaram atrasados.`);
+      }
+    }
+    state.hojeAtrasadosVistos = idsAgora;
+    const badge = $('#badgeAtrasados');
+    if (badge) { badge.textContent = String(atrasados.length); badge.classList.toggle('hidden', atrasados.length === 0); }
+    // Dashboard (v1.16.27): cartoes coloridos + grafico de barras.
+    const cards = [
+      { cls: 'atrasado', alvo: 'hojeAtrasados', num: atrasados.length, lbl: 'Pedidos atrasados', sub: 'acima do prazo da loja' },
+      { cls: 'preparo', alvo: 'hojePreparo', num: emPreparo.length, lbl: 'Em preparo', sub: 'novos + em preparo' },
+      { cls: 'aguardando', alvo: 'hojeAguardando', num: aguardando.length, lbl: 'Aguardando entrega', sub: 'aguardando o código do cliente' },
+    ];
+    const max = Math.max(1, ...cards.map(c => c.num));
+    $('#hojeCards').innerHTML = cards.map(c => `<div class="hoje-card ${c.cls}" data-alvo="${c.alvo}">
+      <div class="num">${c.num}</div><div class="lbl">${c.lbl}</div><div class="sub">${c.sub}</div></div>`).join('');
+    $('#hojeGrafico').innerHTML = cards.map(c => `<div class="hoje-barra-linha"><span class="hoje-barra-rot">${c.lbl}</span>
+      <span class="hoje-barra-trilho"><span class="hoje-barra-preench ${c.cls}" style="width:${c.num ? Math.max(4, Math.round(c.num / max * 100)) : 0}%"></span></span>
+      <span class="hoje-barra-num">${c.num}</span></div>`).join('');
+    $$('#hojeCards .hoje-card').forEach(c => c.addEventListener('click', () => {
+      const el = document.getElementById(c.dataset.alvo);
+      if (!el) return;
+      // A lista vive numa caixa expansiva fechada: abre antes de rolar.
+      const bloco = el.closest('.bloco-exp');
+      if (bloco && !bloco.classList.contains('aberto')) {
+        bloco.classList.add('aberto');
+        try { localStorage.setItem('fid_exp_' + (bloco.dataset.exp || ''), '1'); } catch { /* ok */ }
+      }
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+    if (state.view !== 'hoje') return;
+    const pinta = (qtdEl, boxEl, arr, vazio, comPrazo) => {
+      $(qtdEl).textContent = arr.length ? `(${arr.length})` : '';
+      $(boxEl).innerHTML = arr.length
+        ? arr.map(p => hojeLinha(p, comPrazo ? 'prazo ' + prazo(p) + ' min' : '')).join('')
+        : `<p class="dica">${vazio}</p>`;
+    };
+    pinta('#hojeQtdAtrasados', '#hojeAtrasados', atrasados, 'Nenhum pedido atrasado no momento.', true);
+    pinta('#hojeQtdPreparo', '#hojePreparo', emPreparo, 'Nenhum pedido em preparo.');
+    pinta('#hojeQtdAguardando', '#hojeAguardando', aguardando, 'Nenhum pedido aguardando confirmação.');
+    $$('#view-hoje .pcard').forEach(c => c.addEventListener('click', () => abrirDetalhe(c.dataset.id)));
+    // Gráficos do Hoje (v1.16.28): dados reais do dia.
+    // v1.16.30: funcionário vê só a fila — os blocos somem e a rota nem é
+    // chamada (ela responde 403 pra ele; sem o desvio, a 1ª carga
+    // mostraria o erro em aviso).
+    const ehFuncHoje = state.user && state.user.perfil === 'funcionario';
+    $$('#view-hoje .graf-hoje').forEach(b => { b.style.display = ehFuncHoje ? 'none' : ''; });
+    if (!ehFuncHoje) try {
+      const g = await api('/api/painel/hoje-graficos');
+      const porHora = (g.por_hora || []).map(x => ({ rot: String(x.hora).padStart(2, '0') + 'h', val: Number(x.qtd) || 0 }));
+      $('#hojePorHora').innerHTML = porHora.length ? grafBarrasH(porHora, 'azul') : '<p class="dica">Nenhum pedido hoje ainda.</p>';
+      const mais = (g.mais_vendidos || []).map(x => ({ rot: x.nome, val: Number(x.qtd) || 0 }));
+      $('#hojeMais').innerHTML = mais.length ? grafBarrasH(mais, 'verde') : '<p class="dica">Nenhuma venda hoje ainda.</p>';
+      $('#hojePag').innerHTML = grafDonut(g.por_pagamento || []);
+      const moto = (g.motoboys || []).map(x => ({ rot: x.nome, val: Number(x.entregas) || 0, suf: x.valor_centavos ? ' · ' + fmtBRL(x.valor_centavos) : '' }));
+      $('#hojeMotoboys').innerHTML = moto.length ? grafBarrasH(moto, 'verde') : '<p class="dica">Nenhuma entrega concluída hoje ainda.</p>';
+    } catch (err) { if (!silencioso) toast(err.message, true); }
+  } catch (err) { if (!silencioso) toast(err.message, true); }
 }
 async function carregarPedidos(silencioso = false) {
   try {
@@ -1584,39 +1718,108 @@ function comoLista(data, chave) {
   if (data && Array.isArray(data.itens)) return data.itens;
   return [];
 }
-async function carregarRelatorioDia() {
-  if (!state.relData) state.relData = hojeLocal();
-  const inp = $('#relData');
-  if (inp && inp.value !== state.relData) inp.value = state.relData;
+/* ---------- RELATÓRIO — dashboard (v1.16.28) ---------- */
+function limitesMesAtualLocal() {
+  const d = new Date();
+  const a = d.getFullYear(), m = d.getMonth() + 1;
+  const p = (n) => String(n).padStart(2, '0');
+  const ultimo = new Date(a, m, 0).getDate();
+  return { primeiro: `${a}-${p(m)}-01`, ultimo: `${a}-${p(m)}-${p(ultimo)}` };
+}
+function rotuloMesBR(de) {
+  const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const [a, m] = (de || '').split('-');
+  return (MESES[Number(m) - 1] || m) + ' de ' + a;
+}
+async function carregarRelatorioDash() {
+  if (state.relModo === 'mes' || !state.relDe || !state.relAte) {
+    const lim = limitesMesAtualLocal();
+    state.relDe = lim.primeiro; state.relAte = lim.ultimo;
+  }
+  const de = state.relDe, ate = state.relAte;
+  if (ate < de) { toast('A data final vem antes da inicial.', true); return; }
+  const inpDe = $('#relDe'), inpAte = $('#relAte');
+  if (inpDe && inpDe.value !== de) inpDe.value = de;
+  if (inpAte && inpAte.value !== ate) inpAte.value = ate;
+  const segId = state.relSegBtn || (state.relModo === 'mes' ? 'btnRelMes' : 'btnRelPers');
+  ['btnRelMes', 'btnRelSemana', 'btnRelMesPassado', 'btnRel30d', 'btnRelPers'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.classList.toggle('ativo', id === segId);
+  });
   try {
-    const r = await api('/api/painel/relatorio?data=' + encodeURIComponent(state.relData));
-    $('#relCards').innerHTML = `
-      <div class="rel-card fin-vendas"><div class="num">${r.pedidos_concluidos ?? 0}</div><div class="rot">Pedidos concluídos</div></div>
-      <div class="rel-card fin-despesas"><div class="num">${r.cancelados ?? 0}</div><div class="rot">Cancelados</div></div>
-      <div class="rel-card fin-receitas"><div class="num">${fmtBRL(r.faturamento_centavos)}</div><div class="rot">Faturamento do dia</div></div>
-      <div class="rel-card fin-insumos"><div class="num">${fmtBRL(r.ticket_medio_centavos)}</div><div class="rot">Ticket médio</div></div>
-      <div class="rel-card fin-despesas"><div class="num">${fmtBRL(r.motoboy_centavos)}</div><div class="rot">Gasto com motoboys</div></div>`;
-    const lista = (arr, vazio) => (arr && arr.length)
-      ? arr.map(x => `<div class="rel-linha"><span>${esc(x.nome)}</span><strong>${x.qtd ?? x.quantidade ?? ''}</strong></div>`).join('')
-      : `<p class="dica">${vazio}</p>`;
-    $('#relTopProdutos').innerHTML = lista(r.top_produtos, 'Nenhuma venda concluída neste dia.');
-    $('#relTopOpcoes').innerHTML = lista(r.top_opcoes, 'Nenhuma opção registrada neste dia.');
-    const pp = r.por_pagamento || {};
-    $('#relPorPagamento').innerHTML = Object.keys(pp).length
-      ? Object.entries(pp).map(([k, v]) => `<div class="rel-linha"><span>${esc(FORMA_ROTULO[k] || k)}</span><strong>${typeof v === 'number' && v > 500 ? fmtBRL(v) : esc(v)}</strong></div>`).join('')
-      : '<p class="dica">Sem pagamentos registrados neste dia.</p>';
+    const r = await api('/api/painel/relatorio-dashboard?de=' + encodeURIComponent(de) + '&ate=' + encodeURIComponent(ate));
+    const suf = state.relModo === 'mes' ? 'mês' : 'período';
+    const rot = state.relModo === 'mes' ? rotuloMesBR(r.de) : 'De ' + fmtDataBR(r.de) + ' até ' + fmtDataBR(r.ate);
+    const ant = r.anterior || {};
+    const dFat = deltaTxt(r.faturamento_centavos, ant.faturamento_centavos);
+    const dPed = deltaTxt(r.pedidos_concluidos, ant.pedidos_concluidos);
+    const dTick = deltaTxt(r.ticket_medio_centavos, ant.ticket_medio_centavos);
+    $('#relDashCards').innerHTML = `
+      <div class="rel-card fin-receitas"><div class="num">${fmtBRL(r.faturamento_centavos)}</div><div class="rot">Faturamento do ${suf}</div><div class="rot">${esc(rot)}</div><div class="rot delta ${dFat.cls}">${dFat.txt}</div></div>
+      <div class="rel-card fin-vendas"><div class="num">${r.pedidos_concluidos ?? 0}</div><div class="rot">Pedidos no ${suf}</div><div class="rot">pedidos concluídos</div><div class="rot delta ${dPed.cls}">${dPed.txt}</div></div>
+      <div class="rel-card fin-insumos"><div class="num">${fmtBRL(r.ticket_medio_centavos)}</div><div class="rot">Ticket médio</div><div class="rot">faturamento ÷ pedidos</div><div class="rot delta ${dTick.cls}">${dTick.txt}</div></div>`;
+    $('#relDashTitDias').textContent = state.relModo === 'mes' ? 'Faturamento por dia — ' + rot : 'Faturamento por dia — período';
+    $('#relDashTitMais').textContent = 'Mais vendidos — ' + suf;
+    $('#relDashTitPag').textContent = 'Formas de pagamento — ' + suf;
+    $('#relDashTitMoto').textContent = 'Motoboys — ' + suf;
+    const mapaDia = new Map((r.por_dia || []).map(x => [x.dia, Number(x.s) || 0]));
+    const dias = [];
+    for (let d = new Date(r.de + 'T12:00:00'); d <= new Date(r.ate + 'T12:00:00'); d.setDate(d.getDate() + 1)) {
+      const iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      dias.push({ dia: iso, val: mapaDia.get(iso) || 0 });
+    }
+    $('#relDashDias').innerHTML = dias.some(d => d.val > 0) ? grafDias(dias) : '<p class="dica">Sem vendas concluídas neste período.</p>';
+    const mais = (r.mais_vendidos || []).map(x => ({ rot: x.nome, val: Number(x.qtd) || 0 }));
+    $('#relDashMais').innerHTML = mais.length ? grafBarrasH(mais, 'verde') : '<p class="dica">Sem vendas concluídas neste período.</p>';
+    $('#relDashPag').innerHTML = grafDonut(r.por_pagamento || []);
+    const moto = (r.motoboys || []).map(x => ({ rot: x.nome, val: Number(x.entregas) || 0, suf: x.valor_centavos ? ' · ' + fmtBRL(x.valor_centavos) : '' }));
+    $('#relDashMoto').innerHTML = moto.length ? grafBarrasH(moto, 'verde') : '<p class="dica">Nenhuma entrega concluída neste período.</p>';
   } catch (err) { toast(err.message, true); }
 }
-$('#relData').addEventListener('change', (e) => {
-  state.relData = e.target.value || hojeLocal();
-  carregarRelatorioDia();
+function relPeriodo(de, ate, segBtn, modo) {
+  state.relModo = modo; state.relDe = de; state.relAte = ate; state.relSegBtn = segBtn;
+  carregarRelatorioDash();
+}
+const isoDataLocal = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+$('#btnRelMes').addEventListener('click', () => {
+  const lim = limitesMesAtualLocal();
+  relPeriodo(lim.primeiro, lim.ultimo, 'btnRelMes', 'mes');
 });
-$('#btnRelPdf').addEventListener('click', async () => {
-  const data = state.relData || hojeLocal();
-  const btn = $('#btnRelPdf');
+$('#btnRelSemana').addEventListener('click', () => {
+  const h = new Date(); const seg = new Date(h);
+  seg.setDate(h.getDate() - ((h.getDay() + 6) % 7)); // segunda-feira até hoje
+  relPeriodo(isoDataLocal(seg), isoDataLocal(h), 'btnRelSemana', 'pers');
+});
+$('#btnRelMesPassado').addEventListener('click', () => {
+  const h = new Date(); const y = h.getFullYear(), m = h.getMonth();
+  const a = m === 0 ? y - 1 : y, mm = m === 0 ? 12 : m;
+  const p = (n) => String(n).padStart(2, '0');
+  const ult = new Date(a, mm, 0).getDate();
+  relPeriodo(`${a}-${p(mm)}-01`, `${a}-${p(mm)}-${p(ult)}`, 'btnRelMesPassado', 'pers');
+});
+$('#btnRel30d').addEventListener('click', () => {
+  const h = new Date(); const ini = new Date(h); ini.setDate(h.getDate() - 29);
+  relPeriodo(isoDataLocal(ini), isoDataLocal(h), 'btnRel30d', 'pers');
+});
+$('#btnRelPers').addEventListener('click', () => {
+  state.relModo = 'pers'; state.relSegBtn = 'btnRelPers';
+  carregarRelatorioDash();
+});
+$('#relDe').addEventListener('change', (e) => {
+  state.relModo = 'pers'; state.relSegBtn = null;
+  if (e.target.value) state.relDe = e.target.value;
+  carregarRelatorioDash();
+});
+$('#relAte').addEventListener('change', (e) => {
+  state.relModo = 'pers'; state.relSegBtn = null;
+  if (e.target.value) state.relAte = e.target.value;
+  carregarRelatorioDash();
+});
+$('#btnRelPdfPeriodo').addEventListener('click', async () => {
+  const btn = $('#btnRelPdfPeriodo');
   btn.disabled = true;
   try {
-    const res = await fetch('/api/painel/relatorio/pdf?data=' + encodeURIComponent(data), {
+    const res = await fetch('/api/painel/relatorio-dashboard/pdf?de=' + encodeURIComponent(state.relDe) + '&ate=' + encodeURIComponent(state.relAte), {
       headers: state.token ? { 'Authorization': 'Bearer ' + state.token } : {},
     });
     if (res.status === 401) { sair(false); throw new Error('Sessão expirada. Entre de novo.'); }
@@ -1625,12 +1828,12 @@ $('#btnRelPdf').addEventListener('click', async () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'relatorio-' + data + '.pdf';
+    a.download = 'relatorio-' + state.relDe + '_a_' + state.relAte + '.pdf';
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-    toast('PDF do relatório de ' + fmtDataBR(data) + ' salvo.');
+    toast('PDF do período salvo.');
   } catch (err) { toast(err.message, true); }
   btn.disabled = false;
 });
@@ -3299,7 +3502,7 @@ function iniciarApp() {
     } catch { /* silencioso */ }
   });
   
-  irPara('pedidos');
+  irPara('hoje');
   conectarStream();
   if (!ehAdmin) iniciarPonto();
 }

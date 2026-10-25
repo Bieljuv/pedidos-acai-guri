@@ -87,7 +87,7 @@ async function autenticar(req, res, next) {
     const p = req.path, m = req.method;
     const livre =
       p.startsWith('/api/painel/push/') ||
-      (m === 'GET' && (p === '/api/painel/pedidos' || p === '/api/painel/eventos' || p === '/api/painel/trabalhando' || p === '/api/painel/loja' || p === '/api/painel/saude' ||
+      (m === 'GET' && (p === '/api/painel/pedidos' || p === '/api/painel/hoje' || p === '/api/painel/eventos' || p === '/api/painel/trabalhando' || p === '/api/painel/loja' || p === '/api/painel/saude' ||
         /^\/api\/painel\/pedidos\/\d+$/.test(p) || /^\/api\/painel\/pedidos\/\d+\/entregas$/.test(p))) ||
       (m === 'POST' && (p === '/api/painel/trabalhando' || p === '/api/painel/trocar-senha' ||
         /^\/api\/painel\/pedidos\/\d+\/transicao$/.test(p) || /^\/api\/painel\/pedidos\/\d+\/imprimir$/.test(p) ||
@@ -353,6 +353,47 @@ app.get('/api/painel/pedidos', auth, h(async (req, res) => {
   const saida = [];
   for (const p of lista) saida.push({ ...p, itens: await pedidosCore.getItensPedido(p.id) });
   res.json(saida);
+}));
+// Hoje (v1.16.26): fila aberta da loja — o servidor só entrega os pedidos
+// abertos e os prazos configurados; quem classifica (atrasado ou não) é o
+// painel, que já tem o relógio certo. Sem filtro de dia: pedido aberto de
+// ontem continua aparecendo até ser resolvido.
+app.get('/api/painel/hoje', auth, h(async (req, res) => {
+  const loja = await get(`SELECT tempo_preparo_min, tempo_entrega_min FROM lojas WHERE id=${lid()}`);
+  const lista = await all(`SELECT p.*, u.nome AS motoboy_nome FROM pedidos p LEFT JOIN usuarios u ON u.id = p.motoboy_id WHERE p.loja_id=${lid()} AND p.status IN ('NOVO','EM_PREPARO','PRONTO','SAIU_ENTREGA') ORDER BY p.id ASC`);
+  res.json({ prazo_prep_min: Number(loja?.tempo_preparo_min) || 20, prazo_entrega_min: Number(loja?.tempo_entrega_min) || 40, pedidos: lista });
+}));
+// Gráficos do Hoje (v1.16.28): hora a hora, mais vendidos, pagamento e motoboys do dia.
+app.get('/api/painel/hoje-graficos', auth, h(async (req, res) => {
+  res.json(await financeiro.graficosHoje());
+}));
+// Dashboard do Relatório (v1.16.28): agregados do período; sem datas, o mês atual.
+app.get('/api/painel/relatorio-dashboard', auth, soAdmin, h(async (req, res) => {
+  let { de, ate } = req.query || {};
+  if (!de && !ate) {
+    const lim = financeiro.limitesDoMes(financeiro.hojeSP().slice(0, 7));
+    de = lim.primeiro; ate = lim.ultimo;
+  }
+  if (!financeiro.dataValida(de) || !financeiro.dataValida(ate) || ate < de) {
+    return res.status(422).json({ erro: 'Período inválido. Use AAAA-MM-DD com fim depois do início.' });
+  }
+  res.json(await financeiro.resumoDashboard(de, ate));
+}));
+// PDF do período do Relatório (v1.16.29): mesmo conteúdo do dashboard + financeiro.
+app.get('/api/painel/relatorio-dashboard/pdf', auth, soAdmin, h(async (req, res) => {
+  let { de, ate } = req.query || {};
+  if (!de && !ate) {
+    const lim = financeiro.limitesDoMes(financeiro.hojeSP().slice(0, 7));
+    de = lim.primeiro; ate = lim.ultimo;
+  }
+  if (!financeiro.dataValida(de) || !financeiro.dataValida(ate) || ate < de) {
+    return res.status(422).json({ erro: 'Período inválido. Use AAAA-MM-DD com fim depois do início.' });
+  }
+  const dash = await financeiro.resumoDashboard(de, ate);
+  const calc = await financeiro.calcularPeriodo(de, ate);
+  const loja = await pedidosCore.getLoja();
+  const info = { nome: loja ? loja.nome : 'Loja', logo: await financeiro.carregarLogo(loja && loja.logo_url) };
+  return financeiro.gerarPdfRelatorioPeriodo(dash, calc, info, res);
 }));
 // Trava "Trabalhando" (v1.11.0): o funcionário declara que está
 // trabalhando; só com a sessão aberta o servidor aceita ele mexer

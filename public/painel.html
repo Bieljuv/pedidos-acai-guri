@@ -72,7 +72,8 @@
     </div>
 
     <nav class="menu">
-      <button class="menu-item active" data-view="pedidos"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-receipt"></use></svg> Pedidos <span id="badgeNovos" class="badge-count hidden">0</span></button>
+      <button class="menu-item" data-view="pedidos"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-receipt"></use></svg> Pedidos <span id="badgeNovos" class="badge-count hidden">0</span></button>
+      <button class="menu-item active" data-view="hoje"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-clock"></use></svg> Hoje <span id="badgeAtrasados" class="badge-count hidden">0</span></button>
       <button class="menu-item" data-view="primeiros-passos" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-flag"></use></svg> Primeiros Passos <span id="badgePassos" class="badge-count hidden">0</span></button>
       <button class="menu-item" data-view="cardapio"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-book"></use></svg> Cardápio</button>
       <button class="menu-item" data-view="grupos"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-layers"></use></svg> Grupos e Opções</button>
@@ -86,7 +87,7 @@
       </div>
 
       <button class="menu-item" data-view="loja" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-store"></use></svg> Loja e Aparência</button>
-      <button class="menu-item" data-view="relatorio" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chart"></use></svg> Relatório do Dia</button>
+      <button class="menu-item" data-view="relatorio" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chart"></use></svg> Relatório</button>
       <button class="menu-item" data-view="contabil" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-calculator"></use></svg> Contábil</button>
       <button class="menu-item" data-view="financeiro" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-wallet"></use></svg> Financeiro</button>
       <button class="menu-item" data-view="fidelidade" data-admin><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Fidelidade</button>
@@ -135,6 +136,46 @@
     <main class="content">
 
       <!-- PEDIDOS -->
+      <section id="view-hoje" class="view hidden">
+        <h3 class="view-h">Hoje</h3>
+        <p class="dica">O que precisa de atenção agora. Atrasado = pedido aberto há mais tempo que o prazo configurado da loja (preparo + entrega; só preparo para retirada). Toque no cartão para ir à lista, e no pedido para abrir o detalhe.</p>
+        <div class="hoje-cards" id="hojeCards"></div>
+        <div class="bloco">
+          <div class="bloco-head"><h3>Gráfico — Hoje</h3></div>
+          <div id="hojeGrafico"><p class="dica">Carregando…</p></div>
+        </div>
+        <div class="bloco graf-hoje">
+          <div class="bloco-head"><h3>Pedidos por hora — hoje</h3></div>
+          <div id="hojePorHora"><p class="dica">Carregando…</p></div>
+        </div>
+        <div class="grid-2">
+          <div class="bloco graf-hoje">
+            <div class="bloco-head"><h3>Mais vendidos — hoje</h3></div>
+            <div id="hojeMais"><p class="dica">Carregando…</p></div>
+          </div>
+          <div class="bloco graf-hoje">
+            <div class="bloco-head"><h3>Formas de pagamento — hoje</h3></div>
+            <div id="hojePag"><p class="dica">Carregando…</p></div>
+          </div>
+        </div>
+        <div class="bloco graf-hoje">
+          <div class="bloco-head"><h3>Motoboys — hoje</h3></div>
+          <div id="hojeMotoboys"><p class="dica">Carregando…</p></div>
+        </div>
+        <div class="bloco bloco-exp" data-exp="hoje_atrasados">
+          <div class="bloco-head"><h3>Pedidos atrasados <span class="dica" id="hojeQtdAtrasados"></span></h3></div>
+          <div class="bloco-corpo"><div id="hojeAtrasados"><p class="dica">Carregando…</p></div></div>
+        </div>
+        <div class="bloco bloco-exp" data-exp="hoje_preparo">
+          <div class="bloco-head"><h3>Em preparo <span class="dica" id="hojeQtdPreparo"></span></h3></div>
+          <div class="bloco-corpo"><div id="hojePreparo"><p class="dica">Carregando…</p></div></div>
+        </div>
+        <div class="bloco bloco-exp" data-exp="hoje_aguardando">
+          <div class="bloco-head"><h3>Aguardando confirmação de entrega <span class="dica" id="hojeQtdAguardando"></span></h3></div>
+          <div class="bloco-corpo"><div id="hojeAguardando"><p class="dica">Carregando…</p></div></div>
+        </div>
+      </section>
+
       <section id="view-pedidos" class="view">
         <!-- Trava "Trabalhando" (v1.11.0): só aparece pra funcionário -->
         <div id="travaCard" class="trava-card hidden">
@@ -422,26 +463,39 @@
 
       <!-- RELATÓRIO DO DIA -->
       <section id="view-relatorio" class="view hidden">
-        <h3 class="view-h">Relatório do Dia</h3>
+        <h3 class="view-h">Relatório</h3>
+        <p class="dica">O mesmo estilo do Hoje. Ao entrar, mostra o geral do mês; trocou as datas, tudo muda junto.</p>
         <div class="toolbar">
-          <label>Data <input type="date" id="relData"></label>
-          <button class="btn btn-primary btn-sm" id="btnRelPdf" type="button"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-file"></use></svg> Salvar PDF do dia</button>
-          <span class="toolbar-info">O PDF traz vendas, formas de pagamento, tops e o financeiro do dia selecionado.</span>
+          <div class="seg" role="group" aria-label="Período">
+            <button class="btn btn-sm" id="btnRelMes" type="button">Mês atual</button>
+            <button class="btn btn-sm" id="btnRelSemana" type="button">Semana atual</button>
+            <button class="btn btn-sm" id="btnRelMesPassado" type="button">Mês passado</button>
+            <button class="btn btn-sm" id="btnRel30d" type="button">Últimos 30 dias</button>
+            <button class="btn btn-sm" id="btnRelPers" type="button">Personalizado</button>
+          </div>
+          <label>De <input type="date" id="relDe"></label>
+          <label>Até <input type="date" id="relAte"></label>
+          <button class="btn btn-primary btn-sm" id="btnRelPdfPeriodo" type="button"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-file"></use></svg> Salvar PDF do período</button>
+          <span class="toolbar-info">Trocou a data, atualiza sozinho.</span>
         </div>
-        <div class="rel-cards" id="relCards"></div>
+        <div class="rel-cards" id="relDashCards"></div>
+        <div class="card-form">
+          <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-calendar"></use></svg> <span id="relDashTitDias">Faturamento por dia</span></h4>
+          <div id="relDashDias"><p class="dica">Carregando…</p></div>
+        </div>
         <div class="grid-2">
           <div class="card-form">
-            <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> Produtos mais vendidos</h4>
-            <div id="relTopProdutos"></div>
+            <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-trophy"></use></svg> <span id="relDashTitMais">Mais vendidos</span></h4>
+            <div id="relDashMais"><p class="dica">Carregando…</p></div>
           </div>
           <div class="card-form">
-            <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-layers"></use></svg> Acompanhamentos / opções mais pedidos</h4>
-            <div id="relTopOpcoes"></div>
+            <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-wallet"></use></svg> <span id="relDashTitPag">Formas de pagamento</span></h4>
+            <div id="relDashPag"><p class="dica">Carregando…</p></div>
           </div>
         </div>
         <div class="card-form">
-          <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-wallet"></use></svg> Total por forma de pagamento</h4>
-          <div id="relPorPagamento"></div>
+          <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-scooter"></use></svg> <span id="relDashTitMoto">Motoboys</span></h4>
+          <div id="relDashMoto"><p class="dica">Carregando…</p></div>
         </div>
       </section>
 

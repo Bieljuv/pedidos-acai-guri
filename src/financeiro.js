@@ -626,11 +626,168 @@ function gerarPdfRelatorioMensal(rel, lojaInfo, res) {
   doc.end();
 }
 
+// ---------- PDF do relatório por PERÍODO (v1.16.29) ----------
+function gerarPdfRelatorioPeriodo(dash, fin, lojaInfo, res) {
+  const doc = abrirDocRelatorio(res, `relatorio-${dash.de}_a_${dash.ate}.pdf`);
+  const { linha, titulo, rodape } = pecasRelatorio(doc);
+  const nome = typeof lojaInfo === 'string' ? lojaInfo : (lojaInfo && lojaInfo.nome);
+  const logo = lojaInfo && typeof lojaInfo === 'object' ? lojaInfo.logo : null;
+  const ROT = { pix: 'Pix', dinheiro: 'Dinheiro', cartao: 'Cartão' };
+  cabecalhoRelatorio(doc, nome, logo, `Relatório — ${dataBR(dash.de)} até ${dataBR(dash.ate)}`);
+  titulo('VENDAS');
+  linha('Pedidos concluídos', String(dash.pedidos_concluidos));
+  linha('Pedidos cancelados', String(dash.cancelados));
+  linha('Faturamento', fmtMoeda(dash.faturamento_centavos), { bold: true });
+  linha('Ticket médio', fmtMoeda(dash.ticket_medio_centavos));
+  titulo('POR FORMA DE PAGAMENTO');
+  if (!dash.por_pagamento.length) doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO).text('Nenhuma venda concluída neste período.');
+  for (const f of dash.por_pagamento) linha(ROT[f.forma] || f.forma, `${f.qtd} pedido(s) — ${fmtMoeda(f.total_centavos)}`);
+  titulo('TOP PRODUTOS');
+  if (!dash.mais_vendidos.length) doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO).text('Nenhuma venda concluída neste período.');
+  for (const p of dash.mais_vendidos) linha(`${p.nome} × ${p.qtd}`, fmtMoeda(p.valor_centavos || 0));
+  titulo('MOTOBOYS');
+  if (!dash.motoboys.length) doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO).text('Nenhuma entrega concluída neste período.');
+  for (const m of dash.motoboys) linha(`${m.nome} — ${m.entregas} entrega(s)`, fmtMoeda(m.valor_centavos || 0));
+  titulo('FINANCEIRO DO PERÍODO');
+  linha('Vendas do sistema', fmtMoeda(fin.vendas_sistema));
+  linha('Receitas manuais', fmtMoeda(fin.receita_manual));
+  linha('Receita acumulada', fmtMoeda(fin.receita_total), { bold: true });
+  linha('Investimento', fmtMoeda(fin.investimento_manual));
+  linha('Insumos', fmtMoeda(fin.insumos_total));
+  linha('Despesas', fmtMoeda(fin.despesas));
+  linha('Motoboys', fmtMoeda(fin.motoboy_total));
+  linha('Custo total', fmtMoeda(fin.custo_total));
+  doc.moveDown(0.3);
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(PDF_PRETO)
+    .text(`LUCRO REAL: ${fmtMoeda(fin.lucro_real)}`);
+  doc.font('Helvetica').fontSize(11).fillColor(PDF_PRETO)
+    .text(`Custo por copo: ${fmtMoeda(fin.custo_por_copo)} · Preço médio por copo: ${fmtMoeda(fin.preco_medio_copo)} · Lucro por copo: ${fmtMoeda(fin.lucro_por_copo)}`);
+  rodape();
+  doc.end();
+}
+
+// ---------- dashboard do Relatório e gráficos do Hoje (v1.16.28) ----------
+// Hoje da loja (America/Sao_Paulo), independente do fuso do servidor.
+function hojeSP() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+function horaSP(iso) { // instante (texto UTC ou ISO) -> hora 0-23 em SP
+  if (!iso) return null;
+  let s = String(iso);
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) s = s.replace(' ', 'T') + 'Z';
+  const d = new Date(s);
+  if (isNaN(d)) return null;
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false }).format(d)) % 24;
+}
+// Período anterior ao dado: se o período é um mês cheio, o mês anterior
+// cheio; senão, a janela do mesmo tamanho terminando no dia anterior a `de`.
+function periodoAnterior(de, ate) {
+  const p = (n) => String(n).padStart(2, '0');
+  const [a, m] = de.split('-').map(Number);
+  const pri = `${a}-${p(m)}-01`;
+  const ult = limitesDoMes(`${a}-${p(m)}`).ultimo;
+  if (de === pri && ate === ult) {
+    const pm = m === 1 ? { a: a - 1, m: 12 } : { a, m: m - 1 };
+    return limitesDoMes(`${pm.a}-${p(pm.m)}`);
+  }
+  const t0 = Date.parse(de + 'T12:00:00Z'), t1 = Date.parse(ate + 'T12:00:00Z');
+  const n = Math.max(1, Math.round((t1 - t0) / 86400000) + 1);
+  const fim = new Date(t0 - 86400000), ini = new Date(t0 - n * 86400000);
+  const f = (d) => `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+  return { primeiro: f(ini), ultimo: f(fim) };
+}
+// Agregados do período para o dashboard do Relatório: segue a regra do
+// relatório existente — faturamento e tops contam só o ENTREGUE.
+async function resumoDashboard(de, ate) {
+  const calc = await calcularPeriodo(de, ate);
+  const ant = periodoAnterior(de, ate);
+  const calcAnt = await calcularPeriodo(ant.primeiro, ant.ultimo);
+  const por_dia = await all(
+    `SELECT date(p.created_at,'localtime') AS dia, COUNT(*) AS c, COALESCE(SUM(p.total_centavos),0) AS s
+       FROM pedidos p
+      WHERE p.loja_id=1 AND ${PERIODO_PEDIDOS} AND p.status='ENTREGUE'
+      GROUP BY dia ORDER BY dia`, de, ate);
+  for (const r of por_dia) r.dia = diaISO(r.dia);
+  const mais_vendidos = await all(
+    `SELECT pi.nome_snapshot AS nome, SUM(pi.quantidade) AS qtd, COALESCE(SUM(pi.subtotal_centavos),0) AS valor_centavos
+       FROM pedido_itens pi JOIN pedidos p ON p.id=pi.pedido_id
+      WHERE p.loja_id=1 AND ${PERIODO_PEDIDOS} AND p.status='ENTREGUE'
+      GROUP BY pi.nome_snapshot ORDER BY qtd DESC LIMIT 8`, de, ate);
+  const por_pagamento = await all(
+    `SELECT ${FAMILIA_PAGAMENTO} AS forma, COUNT(*) AS qtd, COALESCE(SUM(p.total_centavos),0) AS total_centavos
+       FROM pedidos p
+      WHERE p.loja_id=1 AND ${PERIODO_PEDIDOS} AND p.status='ENTREGUE'
+      GROUP BY forma ORDER BY forma`, de, ate);
+  const motoboys = await all(
+    `SELECT u.nome AS nome, u.modelo_pagamento, u.valor_entrega_centavos, u.valor_diaria_centavos,
+            COUNT(*) AS entregas, COUNT(DISTINCT date(p.created_at,'localtime')) AS dias
+       FROM pedidos p JOIN usuarios u ON u.id=p.motoboy_id
+      WHERE p.loja_id=1 AND ${PERIODO_PEDIDOS} AND p.status='ENTREGUE'
+      GROUP BY u.id, u.nome, u.modelo_pagamento, u.valor_entrega_centavos, u.valor_diaria_centavos
+      ORDER BY entregas DESC LIMIT 8`, de, ate);
+  for (const mb of motoboys) {
+    const modelo = mb.modelo_pagamento === 'por_entrega' ? 'por_entrega' : 'diaria';
+    const taxa = modelo === 'por_entrega' ? Number(mb.valor_entrega_centavos || 0) : Number(mb.valor_diaria_centavos || 0);
+    mb.modelo = modelo;
+    mb.valor_centavos = (modelo === 'por_entrega' ? Number(mb.entregas) : Number(mb.dias)) * taxa;
+  }
+  return {
+    de, ate,
+    faturamento_centavos: calc.vendas_sistema,
+    pedidos_concluidos: calc.pedidos_concluidos,
+    cancelados: calc.cancelados,
+    ticket_medio_centavos: calc.pedidos_concluidos ? roundHU(calc.vendas_sistema / calc.pedidos_concluidos) : 0,
+    anterior: {
+      de: ant.primeiro, ate: ant.ultimo,
+      faturamento_centavos: calcAnt.vendas_sistema,
+      pedidos_concluidos: calcAnt.pedidos_concluidos,
+      ticket_medio_centavos: calcAnt.pedidos_concluidos ? roundHU(calcAnt.vendas_sistema / calcAnt.pedidos_concluidos) : 0,
+    },
+    por_dia, mais_vendidos, por_pagamento, motoboys,
+  };
+}
+// Gráficos do Hoje: visão operacional do dia — pedidos por hora, mais
+// vendidos e pagamento contam o criado hoje sem cancelado; motoboys, a
+// entrega concluída hoje.
+async function graficosHoje() {
+  const hoje = hojeSP();
+  const filtro = `p.loja_id=1 AND date(p.created_at,'localtime')=?`;
+  const lista = await all(
+    `SELECT p.created_at, p.total_centavos, ${FAMILIA_PAGAMENTO} AS familia
+       FROM pedidos p WHERE ${filtro} AND p.status!='CANCELADO'`, hoje);
+  const horas = Array(24).fill(0);
+  for (const p of lista) { const h = horaSP(p.created_at); if (h !== null) horas[h]++; }
+  const por_hora = horas.map((qtd, hora) => ({ hora, qtd })).filter((x) => x.qtd > 0);
+  const mais_vendidos = await all(
+    `SELECT pi.nome_snapshot AS nome, SUM(pi.quantidade) AS qtd
+       FROM pedido_itens pi JOIN pedidos p ON p.id=pi.pedido_id
+      WHERE ${filtro} AND p.status!='CANCELADO'
+      GROUP BY pi.nome_snapshot ORDER BY qtd DESC LIMIT 8`, hoje);
+  const por_pagamento = await all(
+    `SELECT ${FAMILIA_PAGAMENTO} AS forma, COUNT(*) AS qtd, COALESCE(SUM(p.total_centavos),0) AS total_centavos
+       FROM pedidos p WHERE ${filtro} AND p.status!='CANCELADO'
+      GROUP BY forma ORDER BY forma`, hoje);
+  const motoboys = await all(
+    `SELECT u.nome AS nome, u.modelo_pagamento, u.valor_entrega_centavos, u.valor_diaria_centavos,
+            COUNT(*) AS entregas, COUNT(DISTINCT date(p.created_at,'localtime')) AS dias
+       FROM pedidos p JOIN usuarios u ON u.id=p.motoboy_id
+      WHERE ${filtro} AND p.status='ENTREGUE'
+      GROUP BY u.id, u.nome, u.modelo_pagamento, u.valor_entrega_centavos, u.valor_diaria_centavos
+      ORDER BY entregas DESC LIMIT 8`, hoje);
+  for (const mb of motoboys) {
+    const modelo = mb.modelo_pagamento === 'por_entrega' ? 'por_entrega' : 'diaria';
+    const taxa = modelo === 'por_entrega' ? Number(mb.valor_entrega_centavos || 0) : Number(mb.valor_diaria_centavos || 0);
+    mb.modelo = modelo;
+    mb.valor_centavos = (modelo === 'por_entrega' ? Number(mb.entregas) : Number(mb.dias)) * taxa;
+  }
+  return { data: hoje, por_hora, mais_vendidos, por_pagamento, motoboys };
+}
+
 module.exports = {
-  TIPOS_LANCAMENTO, dataHoje, dataValida, dataBR, roundHU, mesValido, limitesDoMes,
+  TIPOS_LANCAMENTO, dataHoje, dataValida, dataBR, roundHU, mesValido, limitesDoMes, hojeSP,
   listarLancamentos, criarLancamento, atualizarLancamento, excluirLancamento,
   listarInsumos, criarInsumo, atualizarInsumo, excluirInsumo,
-  calcular, calcularPeriodo, resumoRelatorio, relatorioMensal,
+  calcular, calcularPeriodo, resumoRelatorio, relatorioMensal, resumoDashboard, graficosHoje, gerarPdfRelatorioPeriodo,
   dadosXmlMensal, gerarXmlMensal, escapeXml,
   gerarPdfRelatorio, gerarPdfRelatorioMensal, carregarLogo,
 };

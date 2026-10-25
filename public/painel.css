@@ -614,3 +614,48 @@ body.perfil-func .menu-item:not([data-view="pedidos"]) { display: none !importan
 /* Vínculo iFood (v1.16.0) */
 .bloco-vinculo{border:1px solid rgba(127,127,160,.35);border-radius:14px;padding:14px;margin-top:12px}
 .passos-vinculo{margin:8px 0 6px 18px;display:grid;gap:4px;font-size:.86rem;opacity:.85}
+
+/* Dashboard Hoje (v1.16.27): cartoes coloridos + grafico de barras */
+.hoje-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem;margin-bottom:1rem}
+@media (max-width:640px){.hoje-cards{grid-template-columns:1fr}}
+.hoje-card{background:var(--card);border:1px solid var(--linha);border-top:5px solid var(--erro);border-radius:12px;padding:.8rem .9rem;cursor:pointer}
+.hoje-card.preparo{border-top-color:var(--warn)}
+.hoje-card.aguardando{border-top-color:var(--info)}
+.hoje-card .num{font-size:2.3rem;font-weight:800;line-height:1;color:var(--erro)}
+.hoje-card.preparo .num{color:var(--warn)}
+.hoje-card.aguardando .num{color:var(--info)}
+.hoje-card .lbl{font-weight:700;margin-top:.25rem}
+.hoje-card .sub{font-size:.8rem;color:var(--muted)}
+:root[data-tema="escuro"] .hoje-card.atrasado .num{color:#ff7a7a}
+:root[data-tema="escuro"] .hoje-card.preparo .num{color:#f5b800}
+:root[data-tema="escuro"] .hoje-card.aguardando .num{color:#6ea8ff}
+.hoje-barra-linha{display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem}
+.hoje-barra-rot{flex:0 0 150px;font-size:.88rem;font-weight:600}
+@media (max-width:640px){.hoje-barra-rot{flex-basis:110px;font-size:.82rem}}
+.hoje-barra-trilho{flex:1;height:18px;background:var(--linha);border-radius:999px;overflow:hidden}
+.hoje-barra-preench{display:block;height:100%;border-radius:999px;background:var(--erro)}
+.hoje-barra-preench.preparo{background:var(--warn)}
+.hoje-barra-preench.aguardando{background:var(--info)}
+.hoje-barra-num{flex:0 0 2rem;text-align:right;font-weight:800}
+/* Graficos do dashboard (v1.16.28 — Hoje e Relatório) */
+.graf-barra-linha{display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem}
+.graf-barra-rot{flex:0 0 150px;font-size:.88rem;font-weight:600}
+@media (max-width:640px){.graf-barra-rot{flex-basis:110px;font-size:.82rem}}
+.graf-barra-trilho{flex:1;height:18px;background:var(--linha);border-radius:999px;overflow:hidden}
+.graf-barra-preench{display:block;height:100%;border-radius:999px}
+.graf-barra-preench.azul{background:var(--info)}
+.graf-barra-preench.verde{background:var(--ok)}
+.graf-barra-num{flex:0 0 auto;min-width:2.5rem;text-align:right;font-weight:800;white-space:nowrap}
+:root[data-tema="escuro"] .seg .btn:not(.ativo){background:#3a1a4d;border-color:var(--linha);color:#f3e9f7}
+.rel-card .delta{font-weight:700}
+.rel-card .delta.up{color:#b6f2c8}
+.rel-card .delta.down{color:#ffc4bd}
+.graf-dias{display:flex;gap:3px;height:130px;padding-top:.3rem}
+.graf-dia-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+.graf-dia-barra{width:100%;background:#902A88;border-radius:4px 4px 0 0}
+.graf-dia-rot{font-size:.7rem;color:var(--muted)}
+.graf-donut-wrap{display:flex;align-items:center;gap:1.2rem;flex-wrap:wrap}
+.graf-legenda{font-size:.88rem;display:grid;gap:.35rem}
+.graf-legenda i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:.4rem;vertical-align:-1px}
+.seg{display:flex;gap:.25rem}
+.seg .btn.ativo{background:var(--primary);color:#fff;border-color:var(--primary)}

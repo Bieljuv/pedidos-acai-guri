@@ -793,8 +793,13 @@ function atualizarRodapeMontador() {
   if (!mont) return;
   $('#montador-qtd').textContent = mont.qtd;
   const unit = calcularUnitario(mont.produto, mont.selecionadas);
-  $('#montador-adicionar').textContent =
-    `${mont.editandoIdx >= 0 ? 'Atualizar' : 'Adicionar'} • ${R$(unit * mont.qtd)}`;
+  // v1.16.32: com obrigatório pendente, o botão diz O QUE falta em vez
+  // de "Adicionar • R$ 0,00" — o toque continua validando (aviso + rola
+  // até o grupo), mas o botão já não convida ao toque à toa.
+  const pendente = (mont.produto.grupos || []).find((g) => validarGrupo(g, qtdSelecionadas(g.id)));
+  $('#montador-adicionar').textContent = pendente
+    ? `Escolha: ${pendente.nome}`
+    : `${mont.editandoIdx >= 0 ? 'Atualizar' : 'Adicionar'} • ${R$(unit * mont.qtd)}`;
 }
 $('#montador-menos').addEventListener('click', () => { if (mont && mont.qtd > 1) { mont.qtd--; atualizarRodapeMontador(); } });
 $('#montador-mais').addEventListener('click', () => { if (mont && mont.qtd < 30) { mont.qtd++; atualizarRodapeMontador(); } });
@@ -902,6 +907,13 @@ function renderCarrinho() {
     cont.appendChild(div);
   });
   $('#carrinho-subtotal').textContent = R$(subtotalCarrinho());
+  const obsTaxa = $('#carrinho-taxa-obs');
+  if (obsTaxa) {
+    const tc = taxaConhecidaCarrinho();
+    obsTaxa.textContent = tc === null
+      ? 'A taxa de entrega é calculada na finalização.'
+      : `Taxa de entrega${tc.salvo ? ' (seu bairro salvo)' : ''}: ${tc.valor === 0 ? 'Grátis' : R$(tc.valor)}`;
+  }
   $('#btn-ir-checkout').disabled = !carrinho.length;
 }
 $('#barra-carrinho').addEventListener('click', abrirCarrinho);
@@ -1002,6 +1014,20 @@ function taxaZeradaPeloPremio() {
   const t = taxaBruta();
   return t !== null && t > 0 && tipoRecebimento === 'entrega' && premioEntregaGratisValendo();
 }
+/* Taxa que já dá para mostrar no carrinho (v1.16.32): taxa única da
+   loja, ou a do bairro salvo de compras anteriores. Se não dá para
+   saber (sem bairro salvo e sem taxa única), o carrinho mantém o
+   aviso de sempre — o checkout recalcula de qualquer jeito. */
+function taxaConhecidaCarrinho() {
+  if (!Array.isArray(bairros)) return null;
+  if (!bairros.length && loja && loja.taxa_unica_centavos != null)
+    return { valor: loja.taxa_unica_centavos, salvo: false };
+  let salvo = {};
+  try { salvo = JSON.parse(localStorage.getItem('loja_cliente') || '{}'); } catch {}
+  const b = salvo.bairro_id != null ? bairros.find((x) => String(x.id) === String(salvo.bairro_id)) : null;
+  if (b) return { valor: b.taxa_centavos || 0, salvo: true };
+  return null;
+}
 /* Cupom (v1.14.0): a prévia usa tipo/valor que o SERVIDOR devolveu na
    validação; o desconto oficial é recalculado no servidor ao criar o pedido. */
 let cupomAplicado = null; // {codigo, tipo, valor}
@@ -1066,8 +1092,15 @@ function atualizarResumoCheckout() {
   $('#rs-desconto-linha').hidden = desconto <= 0;
   if (desconto > 0) { $('#rs-cupom-codigo').textContent = cupomAplicado.codigo; $('#rs-desconto').textContent = '-' + R$(desconto); }
   $('#rs-total').textContent = R$(sub - desconto + (taxa || 0));
+  // v1.16.32: com a taxa ainda desconhecida, o total é PARCIAL — o rótulo
+  // e o botão dizem isso, em vez de o cliente confirmar achando que é
+  // o valor final.
+  const rotTotal = $('#rs-total-rot');
+  if (rotTotal) rotTotal.textContent = taxa === null ? 'Total parcial' : 'TOTAL';
   const btn = $('#btn-confirmar');
-  btn.textContent = `Confirmar pedido • ${R$(sub - desconto + (taxa || 0))}`;
+  btn.textContent = taxa === null
+    ? `Confirmar pedido • ${R$(sub - desconto)} + taxa`
+    : `Confirmar pedido • ${R$(sub - desconto + (taxa || 0))}`;
   const avisoMin = $('#rs-minimo');
   let bloqueia = false;
   if (loja && loja.pedido_minimo_centavos > 0 && sub < loja.pedido_minimo_centavos) {

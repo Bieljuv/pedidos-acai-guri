@@ -645,6 +645,11 @@ body.perfil-func .menu-item:not([data-view="pedidos"]) { display: none !importan
 .graf-barra-preench{display:block;height:100%;border-radius:999px}
 .graf-barra-preench.azul{background:var(--info)}
 .graf-barra-preench.verde{background:var(--ok)}
+.graf-barra-preench.roxo{background:#902A88}
+.graf-barra-preench.amarelo{background:#e6a700}
+.graf-barra-preench.vermelho{background:var(--erro)}
+.grupo-tit{font-size:1rem;font-weight:800;margin:1.2rem 0 .6rem;display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap}
+.grupo-tit span{font-weight:400;color:var(--muted);font-size:.88rem}
 .graf-barra-num{flex:0 0 auto;min-width:2.5rem;text-align:right;font-weight:800;white-space:nowrap}
 :root[data-tema="escuro"] .seg .btn:not(.ativo){background:#3a1a4d;border-color:var(--linha);color:#f3e9f7}
 .rel-card .delta{font-weight:700}

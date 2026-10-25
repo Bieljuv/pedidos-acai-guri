@@ -546,11 +546,11 @@ function hojeLinha(p, prazoTxt) {
   </article>`;
 }
 /* ---------- Gráficos do dashboard (v1.16.28 — Hoje e Relatório) ---------- */
-function grafBarrasH(itens, cor) { // [{rot, val, suf?}] -> linhas de barra horizontal
+function grafBarrasH(itens, cor) { // [{rot, val, suf?, txt?, cor?}] -> linhas de barra horizontal
   const max = Math.max(1, ...itens.map(i => i.val));
   return itens.map(i => `<div class="graf-barra-linha"><span class="graf-barra-rot">${esc(i.rot)}</span>
-    <span class="graf-barra-trilho"><span class="graf-barra-preench ${cor}" style="width:${i.val ? Math.max(4, Math.round(i.val / max * 100)) : 0}%"></span></span>
-    <span class="graf-barra-num">${i.val}${i.suf || ''}</span></div>`).join('');
+    <span class="graf-barra-trilho"><span class="graf-barra-preench ${i.cor || cor}" style="width:${i.val ? Math.max(4, Math.round(i.val / max * 100)) : 0}%"></span></span>
+    <span class="graf-barra-num">${i.txt ?? i.val}${i.suf || ''}</span></div>`).join('');
 }
 function deltaTxt(cur, prev) { // comparativo com o período anterior
   cur = Number(cur) || 0; prev = Number(prev) || 0;
@@ -1855,32 +1855,45 @@ async function carregarRelatorioMes() {
     const r = await api('/api/painel/relatorio/mensal?mes=' + encodeURIComponent(state.relMes));
     const t = r.totais || {};
     const f = r.financeiro || {};
+    const diaDia = (Number(f.insumos_total) || 0) + (Number(f.despesas) || 0) + (Number(f.motoboy_total) || 0);
     const op = Number(f.lucro_operacional_centavos) || 0;
+    const real = Number(f.lucro_real) || 0;
+    const inv = Number(f.investimento_manual) || 0;
+    $('#relMesVendasSub').textContent = `${t.pedidos_concluidos ?? 0} pedidos concluídos · ${t.pedidos_cancelados ?? 0} cancelado(s)`;
     $('#relMesCards').innerHTML = `
       <div class="rel-card fin-receitas"><div class="num">${fmtBRL(t.faturamento_centavos)}</div><div class="rot">Faturamento do mês</div></div>
       <div class="rel-card fin-vendas"><div class="num">${t.pedidos_concluidos ?? 0}</div><div class="rot">Pedidos concluídos</div></div>
-      <div class="rel-card fin-despesas"><div class="num">${t.pedidos_cancelados ?? 0}</div><div class="rot">Cancelados</div></div>
-      <div class="rel-card fin-insumos"><div class="num">${fmtBRL(t.ticket_medio_centavos)}</div><div class="rot">Ticket médio</div></div>
-      <div class="rel-card fin-insumos"><div class="num">${fmtBRL(f.insumos_total)}</div><div class="rot"><span class="dot dot-azul"></span> Insumos</div></div>
-      <div class="rel-card fin-despesas"><div class="num">${fmtBRL(f.despesas)}</div><div class="rot"><span class="dot dot-vermelho"></span> Despesas</div></div>
-      <div class="rel-card fin-despesas"><div class="num">${fmtBRL(f.motoboy_total)}</div><div class="rot"><span class="dot dot-vermelho"></span> Motoboys</div></div>
-      <div class="rel-card fin-investimento"><div class="num">${fmtBRL(f.investimento_manual)}</div><div class="rot"><span class="dot dot-amarelo"></span> Investimento</div></div>
-      <div class="rel-card ${op >= 0 ? 'lucro-pos' : 'lucro-neg'}"><div class="num">${fmtBRL(op)}</div><div class="rot">Lucro das vendas (operacional)</div></div>`;
-    const real = Number(f.lucro_real) || 0;
+      <div class="rel-card fin-insumos"><div class="num">${fmtBRL(t.ticket_medio_centavos)}</div><div class="rot">Ticket médio</div></div>`;
+    $('#relMesCustosSub').textContent = `${fmtBRL(f.custo_total)} no mês`;
+    $('#relMesCustos').innerHTML = grafBarrasH([
+      { rot: 'Investimento', val: inv, txt: fmtBRL(inv), cor: 'amarelo' },
+      { rot: 'Despesas', val: Number(f.despesas) || 0, txt: fmtBRL(f.despesas), cor: 'vermelho' },
+      { rot: 'Insumos', val: Number(f.insumos_total) || 0, txt: fmtBRL(f.insumos_total), cor: 'roxo' },
+      { rot: 'Motoboys', val: Number(f.motoboy_total) || 0, txt: fmtBRL(f.motoboy_total), cor: 'verde' },
+    ]);
+    const mc = r.maior_custo;
+    const elMc = $('#relMesMaiorCusto');
+    if (mc && Number(mc.valor_centavos) > 0) {
+      elMc.textContent = `Maior custo do mês: ${mc.nome} — ${fmtBRL(mc.valor_centavos)} (${mc.tipo}).`;
+      elMc.style.display = '';
+    } else { elMc.textContent = ''; elMc.style.display = 'none'; }
     $('#relMesLucroCard').innerHTML = `
       <div class="fin-lucro ${real >= 0 ? 'pos' : 'neg'}">
         <div>
           <div class="rot">${real >= 0 ? ic('checkCirculo') : ic('alerta')} RESULTADO APÓS INVESTIMENTOS — ${fmtMesBR(state.relMes)}</div>
           <div class="num">${fmtBRL(real)}</div>
-          <div class="sub">Lucro das vendas ${fmtBRL(op)} − investimento ${fmtBRL(f.investimento_manual)} · Receita acumulada ${fmtBRL(f.receita_total)} − custos ${fmtBRL(f.custo_total)}</div>
+          <div class="sub">Receita acumulada ${fmtBRL(f.receita_total)} − custos do dia a dia ${fmtBRL(diaDia)} = lucro operacional ${fmtBRL(op)}</div>
+          <div class="sub">Lucro operacional − investimento ${fmtBRL(inv)} = ${fmtBRL(real)}</div>
+          ${inv > 0 ? `<div class="sub">Sem o investimento, o mês fecharia em ${fmtBRL(op)}.</div>` : ''}
         </div>
         <div class="sub">${t.pedidos_concluidos ?? 0} pedido(s) concluído(s) no mês</div>
       </div>`;
-    $('#relMesDias').innerHTML = (r.dias && r.dias.length)
-      ? r.dias.map(d => `<div class="rel-linha"><span>${fmtDataBR(d.data)} — ${d.pedidos_concluidos} concluído(s) · ${d.pedidos_cancelados} cancelado(s) · ticket ${fmtBRL(d.ticket_medio_centavos)}</span><strong>${fmtBRL(d.faturamento_centavos)}</strong></div>`).join('')
-      : '<p class="dica">Nenhum pedido neste mês.</p>';
+    const diasComVenda = (r.dias || []).filter(d => Number(d.faturamento_centavos) > 0);
+    $('#relMesDias').innerHTML = diasComVenda.length
+      ? grafBarrasH(diasComVenda.map(d => ({ rot: d.data.slice(8, 10) + '/' + d.data.slice(5, 7), val: Number(d.faturamento_centavos) || 0, txt: fmtBRL(d.faturamento_centavos) })), 'roxo')
+      : '<p class="dica">Nenhuma venda neste mês.</p>';
     $('#relMesPorPagamento').innerHTML = (r.por_pagamento && r.por_pagamento.length)
-      ? r.por_pagamento.map(p => `<div class="rel-linha"><span>${esc(FORMA_ROTULO[p.forma] || p.forma)} — ${p.qtd} pedido(s)</span><strong>${fmtBRL(p.total_centavos)}</strong></div>`).join('')
+      ? grafDonut(r.por_pagamento)
       : '<p class="dica">Sem pagamentos registrados neste mês.</p>';
   } catch (err) { toast(err.message, true); }
 }

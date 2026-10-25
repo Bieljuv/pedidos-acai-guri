@@ -506,17 +506,25 @@
           <label>Mês <input type="month" id="relMes"></label>
           <button class="btn btn-primary btn-sm" id="btnRelPdfMes" type="button"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-file"></use></svg> PDF do mês</button>
           <button class="btn btn-ghost btn-sm" id="btnRelXml" type="button"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-receipt"></use></svg> XML p/ contabilidade</button>
-          <span class="toolbar-info">O XML é um relatório gerencial do mês (não é documento fiscal) — é o arquivo que a contabilidade importa.</span>
+          <span class="toolbar-info">O XML vai pra contabilidade importar. Não é documento fiscal.</span>
         </div>
+        <div class="grupo-tit">Vendas <span id="relMesVendasSub"></span></div>
         <div class="rel-cards" id="relMesCards"></div>
-        <div id="relMesLucroCard"></div>
-        <div class="card-form">
-          <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-calendar"></use></svg> Vendas por dia</h4>
-          <div id="relMesDias"></div>
+        <div class="grupo-tit">Custos <span id="relMesCustosSub"></span></div>
+        <div class="bloco">
+          <div id="relMesCustos"></div>
+          <p class="dica" id="relMesMaiorCusto"></p>
         </div>
-        <div class="card-form">
-          <h4><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-wallet"></use></svg> Total por forma de pagamento</h4>
-          <div id="relMesPorPagamento"></div>
+        <div id="relMesLucroCard"></div>
+        <div class="grid-2">
+          <div class="bloco">
+            <div class="bloco-head"><h3>Vendas por dia</h3></div>
+            <div id="relMesDias"></div>
+          </div>
+          <div class="bloco">
+            <div class="bloco-head"><h3>Formas de pagamento</h3></div>
+            <div id="relMesPorPagamento"></div>
+          </div>
         </div>
       </section>
 

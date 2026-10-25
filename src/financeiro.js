@@ -113,6 +113,7 @@ async function criarLancamento(corpo) {
 async function atualizarLancamento(id, corpo) {
   const atual = await get('SELECT * FROM fin_lancamentos WHERE id=?', id);
   if (!atual) return null;
+  if (Number(atual.loja_id) !== lid()) return null;
   const c = {
     tipo: corpo.tipo !== undefined ? String(corpo.tipo) : atual.tipo,
     categoria: corpo.categoria !== undefined ? String(corpo.categoria) : atual.categoria,
@@ -126,7 +127,7 @@ async function atualizarLancamento(id, corpo) {
   return get('SELECT * FROM fin_lancamentos WHERE id=?', id);
 }
 async function excluirLancamento(id) {
-  return Number((await run('DELETE FROM fin_lancamentos WHERE id=?', id)).changes) > 0;
+  return Number((await run('DELETE FROM fin_lancamentos WHERE id=? AND loja_id=?', id, lid())).changes) > 0;
 }
 
 // ---------- insumos ----------
@@ -150,6 +151,7 @@ async function criarInsumo(corpo) {
 async function atualizarInsumo(id, corpo) {
   const atual = await get('SELECT * FROM fin_insumos WHERE id=?', id);
   if (!atual) return null;
+  if (Number(atual.loja_id) !== lid()) return null;
   const c = {
     nome: corpo.nome !== undefined ? String(corpo.nome).trim() : atual.nome,
     quantidade: corpo.quantidade !== undefined ? Number(corpo.quantidade) : atual.quantidade,
@@ -163,7 +165,7 @@ async function atualizarInsumo(id, corpo) {
   return get('SELECT * FROM fin_insumos WHERE id=?', id);
 }
 async function excluirInsumo(id) {
-  return Number((await run('DELETE FROM fin_insumos WHERE id=?', id)).changes) > 0;
+  return Number((await run('DELETE FROM fin_insumos WHERE id=? AND loja_id=?', id, lid())).changes) > 0;
 }
 
 // ---------- cálculo por período (FONTE ÚNICA — /calculo, PDF e mensal) ----------
@@ -336,7 +338,17 @@ async function relatorioMensal(mes) {
        FROM pedidos p
       WHERE p.loja_id=1 AND ${PERIODO_PEDIDOS} AND p.status='ENTREGUE'
       GROUP BY forma ORDER BY forma`, primeiro, ultimo);
-  return { mes, dias, totais, por_pagamento, financeiro: await calcularPeriodo(primeiro, ultimo) };
+  // Maior custo do mês (v1.16.31): o maior lançamento avulso (investimento
+  // ou despesa) ou insumo do mês — é o que o Contábil destaca no dashboard.
+  const maior_custo = await get(
+    `SELECT nome, valor_centavos, tipo FROM (
+       SELECT COALESCE(NULLIF(descricao,''), categoria) AS nome, valor_centavos, tipo
+         FROM fin_lancamentos WHERE loja_id=1 AND substr(data,1,7)=? AND tipo IN ('investimento','despesa')
+       UNION ALL
+       SELECT nome, custo_total_centavos AS valor_centavos, 'insumo' AS tipo
+         FROM fin_insumos WHERE loja_id=1 AND substr(data,1,7)=?
+     ) ORDER BY valor_centavos DESC LIMIT 1`, mes, mes);
+  return { mes, dias, totais, por_pagamento, maior_custo: maior_custo || null, financeiro: await calcularPeriodo(primeiro, ultimo) };
 }
 
 // ---------- XML mensal (relatório GERENCIAL — não é documento fiscal) ----------

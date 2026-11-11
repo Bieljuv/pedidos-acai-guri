@@ -68,7 +68,7 @@ const state = {
 /* ---------- API ---------- */
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
-  if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+  if (state.token) { headers['Authorization'] = 'Bearer ' + state.token; headers['x-sessao'] = state.token; }
   let body = opts.body;
   if (body && !(body instanceof FormData)) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(body); }
   const res = await fetch(path, { method: opts.method || 'GET', headers, body });
@@ -150,7 +150,15 @@ $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const erro = $('#loginErro'); erro.classList.add('hidden');
   try {
-    const data = await api('/api/auth/login', { method: 'POST', body: { login: $('#loginUser').value.trim(), senha: $('#loginPass').value } });
+    // Login NÃO passa pelo api() genérico: um 401 aqui é "login ou
+    // senha inválidos", não "sessão expirada" (v1.16.35 — o rótulo
+    // genérico confundia quem errava a senha na entrada).
+    const resLogin = await fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login: $('#loginUser').value.trim(), senha: $('#loginPass').value }),
+    });
+    const data = await resLogin.json().catch(() => ({}));
+    if (!resLogin.ok) throw new Error((data && data.erro) || 'Login ou senha inválidos.');
     state.token = data.token;
     state.user = { nome: data.nome, perfil: data.perfil, precisa_trocar_senha: !!data.precisa_trocar_senha };
     localStorage.setItem('painel_token', state.token);
@@ -541,7 +549,7 @@ function hojeLinha(p, prazoTxt) {
     <div class="pcard-top"><span class="pcard-num">#${p.numero}</span>
     <span class="pcard-tempo">${fmtEspera(min)}${prazoTxt ? ' · ' + prazoTxt : ''}</span></div>
     <div class="pcard-cliente">${esc(p.cliente_nome || 'Cliente')}</div>
-    <div class="pcard-itens">${STATUS_ROTULO[p.status] || p.status}${p.tipo === 'retirada' ? ' · Retirada' : ''}${p.motoboy_nome ? ' · ' + esc(p.motoboy_nome) : ''}</div>
+    <div class="pcard-itens">${STATUS_ROTULO[p.status] || p.status}${p.tipo === 'retirada' ? ' · Retirada' : ''}${p.motoboy_nome ? ' · ' + esc(p.motoboy_nome) : ''}${p.chamada_motoboy && !p.motoboy_id ? ' · Chamada aberta' : ''}</div>
     <div class="pcard-bottom"><span class="pcard-total">${fmtBRL(p.total_centavos)}</span></div>
   </article>`;
 }
@@ -779,6 +787,9 @@ async function abrirDetalhe(id, silencioso = false) {
               </select>
               <button class="btn btn-primary" id="btnAtribuirMotoboy">Atribuir</button>
             </div>
+            ${!p.motoboy_id ? (p.chamada_motoboy
+              ? `<p class="dica" style="margin-top:.4rem">Chamada aberta — todos os motoboys da empresa foram avisados. O primeiro que aceitar fica com o pedido.</p><button class="btn btn-ghost" id="btnCancelarChamada" style="margin-top:.4rem">Cancelar chamada</button>`
+              : `<button class="btn btn-ghost" id="btnChamarMotoboy" style="margin-top:.4rem">${ic('moto')} Chamar motoboy</button>`) : ''}
             ${p.motoboy_id ? `<p class="dica" style="margin-top:.4rem">${p.motoboy_aceito_em ? 'Motoboy já aceitou a entrega.' : 'Aguardando o motoboy aceitar.'}</p>` : ''}
           </div>`;
         }
@@ -840,6 +851,22 @@ async function abrirDetalhe(id, silencioso = false) {
       try {
         await api('/api/painel/pedidos/' + p.id + '/motoboy', { method: 'PATCH', body: { motoboy_id: v ? Number(v) : null } });
         toast('Motoboy atualizado.');
+        abrirDetalhe(p.id, true);
+      } catch (err) { toast(err.message, true); }
+    });
+    const bChamar = $('#btnChamarMotoboy');
+    if (bChamar) bChamar.addEventListener('click', async () => {
+      try {
+        await api('/api/painel/pedidos/' + p.id + '/chamar-motoboy', { method: 'POST' });
+        toast('Chamada enviada para os motoboys.');
+        abrirDetalhe(p.id, true);
+      } catch (err) { toast(err.message, true); }
+    });
+    const bCancChamada = $('#btnCancelarChamada');
+    if (bCancChamada) bCancChamada.addEventListener('click', async () => {
+      try {
+        await api('/api/painel/pedidos/' + p.id + '/cancelar-chamada', { method: 'POST' });
+        toast('Chamada cancelada.');
         abrirDetalhe(p.id, true);
       } catch (err) { toast(err.message, true); }
     });
@@ -1364,14 +1391,15 @@ async function carregarBairros() {
     const data = await api('/api/painel/bairros');
     state.bairros = Array.isArray(data) ? data : (data.bairros || []);
     $('#bairrosList').innerHTML = `
-      <table class="simple-table"><thead><tr><th>Bairro</th><th>Taxa de entrega</th><th>Ativo</th><th></th></tr></thead>
+      <table class="simple-table"><thead><tr><th>Bairro</th><th>Taxa de entrega</th><th>Repasse motoboy</th><th>Ativo</th><th></th></tr></thead>
       <tbody>${state.bairros.map(b => `<tr>
         <td>${esc(b.bairro)}</td><td>${fmtBRL(b.taxa_centavos)}</td>
+        <td>${b.repasse_motoboy_centavos != null ? fmtBRL(b.repasse_motoboy_centavos) : 'Taxa cheia'}</td>
         <td>${ativoDe(b) ? 'Sim' : 'Não'}</td>
         <td style="white-space:nowrap">
           <button class="btn btn-ghost btn-sm adm-only" data-bairro-edit="${b.id}">Editar</button>
           <button class="btn btn-ghost btn-sm adm-only" data-bairro-del="${b.id}">${ativoDe(b) ? 'Inativar' : 'Reativar'}</button>
-        </td></tr>`).join('') || '<tr><td colspan="4" class="dica">Nenhum bairro cadastrado.</td></tr>'}</tbody></table>`;
+        </td></tr>`).join('') || '<tr><td colspan="5" class="dica">Nenhum bairro cadastrado.</td></tr>'}</tbody></table>`;
     $$('#bairrosList [data-bairro-edit]').forEach(x => x.addEventListener('click', () => modalBairro(state.bairros.find(b => String(b.id) === x.dataset.bairroEdit))));
     $$('#bairrosList [data-bairro-del]').forEach(x => x.addEventListener('click', async () => {
       const b = state.bairros.find(y => String(y.id) === x.dataset.bairroDel);
@@ -1389,13 +1417,16 @@ function modalBairro(b) {
     <form id="formBairro">
       <label>Bairro <input type="text" id="bNome" value="${esc(b.bairro)}" required></label>
       <label>Taxa de entrega (R$) <input type="text" class="money" id="bTaxa" inputmode="numeric"></label>
+      <label>Repasse ao motoboy (R$) <input type="text" class="money" id="bRepasse" inputmode="numeric"></label>
+      <p class="dica">Vazio = o motoboy recebe a taxa cheia do pedido. Preenchido, ele recebe só esse valor (ex.: taxa 10, repasse 7).</p>
       <label class="chk"><input type="checkbox" id="bAtivo" ${ativoDe(b) ? 'checked' : ''}> Ativo (aparece no checkout)</label>
       <div class="form-actions"><button class="btn btn-primary" type="submit">Salvar</button></div>
     </form>`);
   setMoney($('#bTaxa', body), b.taxa_centavos || 0);
+  setMoney($('#bRepasse', body), b.repasse_motoboy_centavos != null ? b.repasse_motoboy_centavos : null);
   $('#formBairro', body).addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const payload = { bairro: $('#bNome', body).value.trim(), taxa_centavos: getMoney($('#bTaxa', body)) || 0, ativo: $('#bAtivo', body).checked };
+    const payload = { bairro: $('#bNome', body).value.trim(), taxa_centavos: getMoney($('#bTaxa', body)) || 0, repasse_motoboy_centavos: getMoney($('#bRepasse', body)), ativo: $('#bAtivo', body).checked };
     try {
       if (edit) await api('/api/painel/bairros/' + b.id, { method: 'PUT', body: payload });
       else await api('/api/painel/bairros', { method: 'POST', body: payload });
@@ -1820,7 +1851,7 @@ $('#btnRelPdfPeriodo').addEventListener('click', async () => {
   btn.disabled = true;
   try {
     const res = await fetch('/api/painel/relatorio-dashboard/pdf?de=' + encodeURIComponent(state.relDe) + '&ate=' + encodeURIComponent(state.relAte), {
-      headers: state.token ? { 'Authorization': 'Bearer ' + state.token } : {},
+      headers: state.token ? { 'Authorization': 'Bearer ' + state.token, 'x-sessao': state.token } : {},
     });
     if (res.status === 401) { sair(false); throw new Error('Sessão expirada. Entre de novo.'); }
     if (!res.ok) throw new Error('Não foi possível gerar o PDF (erro ' + res.status + ').');
@@ -1904,7 +1935,7 @@ $('#relMes').addEventListener('change', (e) => {
 // Download autenticado (mesmo padrão do PDF do dia: fetch + Bearer + blob).
 async function baixarArquivoPainel(url, nome) {
   const res = await fetch(url, {
-    headers: state.token ? { 'Authorization': 'Bearer ' + state.token } : {},
+    headers: state.token ? { 'Authorization': 'Bearer ' + state.token, 'x-sessao': state.token } : {},
   });
   if (res.status === 401) { sair(false); throw new Error('Sessão expirada. Entre de novo.'); }
   if (!res.ok) throw new Error('Não foi possível gerar o arquivo (erro ' + res.status + ').');
@@ -2961,7 +2992,7 @@ $('#btnBackup').addEventListener('click', async () => {
   const btn = $('#btnBackup');
   btn.disabled = true;
   try {
-    const resp = await fetch('/api/painel/backup', { headers: { Authorization: 'Bearer ' + state.token } });
+    const resp = await fetch('/api/painel/backup', { headers: { Authorization: 'Bearer ' + state.token, 'x-sessao': state.token } });
     if (!resp.ok) throw new Error('Não consegui gerar o backup agora.');
     const blob = await resp.blob();
     const a = document.createElement('a');
@@ -3288,9 +3319,9 @@ function renderMotoboys() {
   const reais = (c) => (Number(c || 0) / 100).toFixed(2).replace('.', ',');
   const paraCentavos = (s) => Math.max(0, Math.round((parseFloat(String(s || '0').replace(',', '.')) || 0) * 100));
   const pagTxt = (m) => {
-    const v = m.modelo_pagamento === 'por_entrega' ? Number(m.valor_entrega_centavos || 0) : Number(m.valor_diaria_centavos || 0);
-    if (!v) return 'sem valor definido';
-    return (m.modelo_pagamento === 'por_entrega' ? 'Por entrega · ' : 'Diária · ') + fmtBRL(v);
+    if (m.modelo_pagamento === 'por_entrega') return 'Por entrega · Bairros e Taxas';
+    const v = Number(m.valor_diaria_centavos || 0);
+    return v ? 'Diária · ' + fmtBRL(v) : 'sem valor definido';
   };
   const seta = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
   box.innerHTML = state.motoboys.map(m => {
@@ -3309,11 +3340,10 @@ function renderMotoboys() {
             <option value="diaria" ${modelo === 'diaria' ? 'selected' : ''}>Diária — cada dia com entrega conta uma diária</option>
           </select>
         </label>
-        <div class="grid-2">
-          <label>Valor por entrega (R$) <input type="text" data-mb-ve="${m.id}" inputmode="decimal" value="${reais(m.valor_entrega_centavos)}" placeholder="0,00"></label>
-          <label>Valor da diária (R$) <input type="text" data-mb-vd="${m.id}" inputmode="decimal" value="${reais(m.valor_diaria_centavos)}" placeholder="0,00"></label>
-        </div>
-        <p class="dica"><strong>Atenção:</strong> o cálculo usa o valor que está configurado no momento — se você mudar o valor no meio do mês, as entregas antigas passam a valer o novo. Defina o valor antes do motoboy começar a rodar.</p>
+        ${modelo === 'por_entrega'
+          ? `<p class="dica">O valor de cada entrega vem de <strong>Bairros e Taxas</strong>: o repasse do bairro, ou a taxa cheia quando o bairro não tem repasse. Cada entrega trava o valor do momento em que foi entregue — mudar o repasse depois não altera as entregas já feitas.</p>`
+          : `<label>Valor da diária (R$) <input type="text" data-mb-vd="${m.id}" inputmode="decimal" value="${reais(m.valor_diaria_centavos)}" placeholder="0,00"></label>
+        <p class="dica">Cada dia com entrega conta uma diária. O repasse de Bairros e Taxas não vale neste modelo — pra pagar por entrega, mude pra "Por entrega".</p>`}
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.6rem">
           <button class="btn btn-primary btn-sm" data-mb-salvar="${m.id}">Salvar pagamento</button>
           <button class="btn btn-ghost btn-sm" data-mb-fin="${m.id}">Financeiro</button>
@@ -3334,11 +3364,14 @@ function renderMotoboys() {
   });
   $$('#motoboyList [data-mb-salvar]').forEach(b => b.addEventListener('click', async () => {
     const id = b.dataset.mbSalvar;
+    const mAtual = state.motoboys.find(x => String(x.id) === id);
+    const veEl = $(`[data-mb-ve="${id}"]`);
+    const vdEl = $(`[data-mb-vd="${id}"]`);
     try {
       await api('/api/painel/motoboys/' + id, { method: 'PATCH', body: {
         modelo_pagamento: $(`[data-mb-modelo="${id}"]`).value,
-        valor_entrega_centavos: paraCentavos($(`[data-mb-ve="${id}"]`).value),
-        valor_diaria_centavos: paraCentavos($(`[data-mb-vd="${id}"]`).value),
+        valor_entrega_centavos: veEl ? paraCentavos(veEl.value) : Number(mAtual ? mAtual.valor_entrega_centavos || 0 : 0),
+        valor_diaria_centavos: vdEl ? paraCentavos(vdEl.value) : Number(mAtual ? mAtual.valor_diaria_centavos || 0 : 0),
       } });
       toast('Pagamento atualizado.');
       carregarMotoboys();
@@ -3525,7 +3558,7 @@ if (state.token) {
   // assustando na abertura (acontecia a cada troca de servidor/banco).
   (async () => {
     try {
-      const r = await fetch('/api/painel/loja', { headers: { Authorization: 'Bearer ' + state.token } });
+      const r = await fetch('/api/painel/loja', { headers: { Authorization: 'Bearer ' + state.token, 'x-sessao': state.token } });
       if (!r.ok) throw new Error('sessao invalida');
       iniciarApp();
     } catch { sair(false); }

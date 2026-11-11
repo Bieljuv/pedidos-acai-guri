@@ -307,6 +307,18 @@ async function transicionar(pedidoId, para, { origem = 'painel', motivo = null, 
   }
   const quem = autor || (origem === 'telegram' ? 'Telegram' : null);
   await run("UPDATE pedidos SET status=?, motivo_cancelamento=?, atualizado_por=COALESCE(?, atualizado_por), updated_at=datetime('now') WHERE id=?", para, para === 'CANCELADO' ? motivo : pedido.motivo_cancelamento, quem, pedidoId);
+  // 1.16.39: repasse do motoboy travado na entrega — vale o valor do
+  // momento da entrega (repasse do bairro, ou a taxa do pedido quando o
+  // bairro não tem repasse). Mudar o repasse depois não altera as
+  // entregas já feitas.
+  if (para === 'ENTREGUE' && pedido.tipo === 'entrega') {
+    let repasse = Number(pedido.taxa_entrega_centavos || 0);
+    if (pedido.bairro_id) {
+      const b = await get('SELECT repasse_motoboy_centavos FROM bairros WHERE id=?', pedido.bairro_id);
+      if (b && b.repasse_motoboy_centavos != null) repasse = Number(b.repasse_motoboy_centavos);
+    }
+    await run('UPDATE pedidos SET repasse_motoboy_centavos=? WHERE id=?', repasse, pedidoId);
+  }
   // Trilha de autoria (v1.9.1): TODA transição grava QUEM fez no histórico.
   // Painel = nome da sessão (vem em `autor`); Telegram = nome do dono +
   // "(Telegram)"; sem ator humano (webhook de pagamento etc.) = "Sistema".
@@ -351,4 +363,22 @@ async function preparar() {
   }
 }
 
-module.exports = { getLoja, montarCardapio, criarPedido, getPedido, getItensPedido, detalhePedido, transicionar, TRANSICOES, preparar, ultimoPedidoDoCliente };
+// Minha conta (v1.16.33): últimos pedidos do cliente pelo WhatsApp —
+// mesmo modelo do ultimoPedidoDoCliente (só o número, sem senha).
+async function pedidosDoCliente(whatsapp, limite = 10) {
+  const w = normalizaFone(whatsapp);
+  if (!w || w.length < 12) return [];
+  const lim = Math.min(20, Math.max(1, Number(limite) || 10));
+  const lista = await all(`SELECT id, numero, token, status, total_centavos, created_at FROM pedidos WHERE loja_id=${lid()} AND cliente_whatsapp=? ORDER BY id DESC LIMIT ${lim}`, w);
+  for (const p of lista) {
+    const itens = await all('SELECT id, produto_id, nome_snapshot, quantidade, observacao FROM pedido_itens WHERE pedido_id=? ORDER BY id', p.id);
+    for (const it of itens) {
+      it.opcoes = await all('SELECT grupo_nome, opcao_nome FROM pedido_item_opcoes WHERE pedido_item_id=? ORDER BY id', it.id);
+      delete it.id;
+    }
+    p.itens = itens;
+  }
+  return lista;
+}
+
+module.exports = { getLoja, montarCardapio, criarPedido, getPedido, getItensPedido, detalhePedido, transicionar, TRANSICOES, preparar, ultimoPedidoDoCliente, pedidosDoCliente };

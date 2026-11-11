@@ -63,7 +63,12 @@ const h = (fn) => (req, res, next) => { Promise.resolve(fn(req, res, next)).catc
 
 // ---------------- Auth ----------------
 async function autenticar(req, res, next) {
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  // 1.16.38: o proxy do preview do Editor APAGA o header Authorization
+  // (previewproxy.ts: delete headers.authorization) — o login passa, mas
+  // toda chamada autenticada chegava sem token e voltava 401. O front
+  // manda o token também em 'x-sessao', que o proxy repassa intacto.
+  // Fora do preview, o Authorization continua valendo como antes.
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.headers['x-sessao'] || '';
   if (!token) return res.status(401).json({ erro: 'Não autenticado.' });
   const sessao = await get('SELECT * FROM sessoes WHERE token=?', token);
   if (!sessao) return res.status(401).json({ erro: 'Sessão inválida. Faça login de novo.' });
@@ -272,6 +277,27 @@ app.get('/api/public/fidelidade/:whatsapp', h(async (req, res) => {
     premio_disponivel: !!st.premio,
     premio_tipo: st.premio ? st.premio.tipo : null,
   });
+}));
+
+// Minha conta (v1.16.33, só WhatsApp, sem senha): últimos pedidos,
+// cupons ativos e últimos sorteados — mesmo freio dos outros públicos.
+app.get('/api/public/meus-pedidos/:whatsapp', h(async (req, res) => {
+  if (!limite.permitido('mped:' + limite.ipDe(req), 30, 60 * 1000)) {
+    return res.status(429).json({ pedidos: [], erro: 'Muitas consultas. Tente de novo em um minuto.' });
+  }
+  res.json({ pedidos: await pedidosCore.pedidosDoCliente(req.params.whatsapp) });
+}));
+app.get('/api/public/cupons-ativos', h(async (req, res) => {
+  if (!limite.permitido('cup:' + limite.ipDe(req), 30, 60 * 1000)) {
+    return res.status(429).json({ cupons: [], erro: 'Muitas consultas. Tente de novo em um minuto.' });
+  }
+  res.json({ cupons: await cupons.ativos() });
+}));
+app.get('/api/public/sorteados', h(async (req, res) => {
+  if (!limite.permitido('sor:' + limite.ipDe(req), 30, 60 * 1000)) {
+    return res.status(429).json({ sorteados: [], erro: 'Muitas consultas. Tente de novo em um minuto.' });
+  }
+  res.json({ sorteados: await fidelidade.ultimosSorteados() });
 }));
 
 // ---------------- Webhooks públicos ----------------
@@ -513,12 +539,12 @@ const CRUD = {
   produtos: { tabela: 'produtos', campos: ['categoria_id', 'nome', 'descricao', 'foto_url', 'preco_base_centavos', 'tipo', 'destaque', 'ativo', 'esgotado', 'ordem'], numericos: ['categoria_id', 'preco_base_centavos', 'destaque', 'ativo', 'esgotado', 'ordem'], ordemLista: 'ordem, id', colunaAtivo: 'ativo' },
   grupos: { tabela: 'grupos_opcoes', campos: ['nome', 'tipo_escolha', 'minimo', 'maximo', 'obrigatorio', 'excedente_vira_pago', 'preco_excedente_centavos', 'ativo', 'ordem'], numericos: ['minimo', 'maximo', 'obrigatorio', 'excedente_vira_pago', 'preco_excedente_centavos', 'ativo', 'ordem'], ordemLista: 'ordem, id', colunaAtivo: 'ativo' },
   opcoes: { tabela: 'opcoes', campos: ['grupo_id', 'nome', 'preco_adicional_centavos', 'ativa', 'esgotada', 'ordem'], numericos: ['grupo_id', 'preco_adicional_centavos', 'ativa', 'esgotada', 'ordem'], semLoja: true, ordemLista: 'grupo_id, ordem, id', colunaAtivo: 'ativa' },
-  bairros: { tabela: 'bairros', campos: ['bairro', 'taxa_centavos', 'ativo'], numericos: ['taxa_centavos', 'ativo'], ordemLista: 'bairro, id', colunaAtivo: 'ativo' },
+  bairros: { tabela: 'bairros', campos: ['bairro', 'taxa_centavos', 'repasse_motoboy_centavos', 'ativo'], numericos: ['taxa_centavos', 'repasse_motoboy_centavos', 'ativo'], ordemLista: 'bairro, id', colunaAtivo: 'ativo' },
 };
 function valorCampo(cfg, campo, valor) {
   if (valor === undefined) return undefined;
   if (cfg.numericos.includes(campo)) {
-    if (valor === null || valor === '') return campo === 'maximo' ? null : 0;
+    if (valor === null || valor === '') return (campo === 'maximo' || campo === 'repasse_motoboy_centavos') ? null : 0;
     if (typeof valor === 'boolean') return valor ? 1 : 0;
     return Number(valor);
   }
@@ -685,6 +711,27 @@ app.post('/api/motoboy/pedidos/:id/aceitar', auth, soMotoboy, h(async (req, res)
   await run('INSERT INTO pedido_status_historico (pedido_id, de_status, para_status, origem, motivo, autor) VALUES (?, ?, ?, ?, ?, ?)', pedido.id, pedido.status, pedido.status, 'motoboy', 'Motoboy aceitou a entrega', `Motoboy ${req.usuario.nome}`);
   res.json({ ok: true });
 }));
+app.get('/api/motoboy/chamadas', auth, soMotoboy, h(async (req, res) => {
+  const lista = await all(`SELECT * FROM pedidos WHERE loja_id=${lid()} AND tipo='entrega' AND chamada_motoboy=1 AND motoboy_id IS NULL AND status IN ('NOVO','EM_PREPARO','PRONTO') ORDER BY id ASC`);
+  const saida = [];
+  for (const p of lista) saida.push(await pedidoParaMotoboy(p));
+  res.json(saida);
+}));
+app.post('/api/motoboy/chamadas/:id/aceitar', auth, soMotoboy, h(async (req, res) => {
+  const id = Number(req.params.id);
+  // Atômico: o UPDATE com a condição só altera se a chamada ainda estiver
+  // aberta e sem motoboy — o segundo que tentar já encontra motoboy_id
+  // preenchido e não altera nada (changes = 0).
+  const info = await run(`UPDATE pedidos SET motoboy_id=?, motoboy_aceito_em=datetime('now'), chamada_motoboy=0 WHERE id=? AND loja_id=${lid()} AND tipo='entrega' AND chamada_motoboy=1 AND motoboy_id IS NULL AND status IN ('NOVO','EM_PREPARO','PRONTO')`, req.usuario.id, id);
+  if (!info || !info.changes) {
+    const p = await pedidosCore.getPedido(id);
+    if (p && p.motoboy_id) return res.status(409).json({ erro: 'Outro motoboy já aceitou esta entrega.' });
+    return res.status(422).json({ erro: 'A chamada não está mais aberta.' });
+  }
+  const p = await pedidosCore.getPedido(id);
+  await run('INSERT INTO pedido_status_historico (pedido_id, de_status, para_status, origem, motivo, autor) VALUES (?, ?, ?, ?, ?, ?)', id, p.status, p.status, 'motoboy', 'Motoboy aceitou a chamada', `Motoboy ${req.usuario.nome}`);
+  res.json({ ok: true, pedido: await pedidoParaMotoboy(p) });
+}));
 app.post('/api/motoboy/pedidos/:id/receber', auth, soMotoboy, h(async (req, res) => {
   const { pedido, erro, status } = await pedidoDoMotoboy(req, req.params.id);
   if (erro) return res.status(status).json({ erro });
@@ -767,10 +814,33 @@ app.patch('/api/painel/pedidos/:id/motoboy', auth, soAdmin, h(async (req, res) =
     mb = await get(`SELECT * FROM usuarios WHERE id=? AND loja_id=${lid()} AND perfil='motoboy' AND ativo=1`, Number(motoboyId));
     if (!mb) return res.status(422).json({ erro: 'Motoboy não encontrado ou inativo.' });
   }
-  await run('UPDATE pedidos SET motoboy_id=?, motoboy_aceito_em=NULL WHERE id=?', mb ? mb.id : null, p.id);
+  await run('UPDATE pedidos SET motoboy_id=?, motoboy_aceito_em=NULL, chamada_motoboy=0 WHERE id=?', mb ? mb.id : null, p.id);
   await run('INSERT INTO pedido_status_historico (pedido_id, de_status, para_status, origem, motivo, autor) VALUES (?, ?, ?, ?, ?, ?)', p.id, p.status, p.status, 'painel', mb ? `Motoboy atribuído: ${mb.nome}` : 'Motoboy removido', req.usuario.nome);
   if (mb) pushPainel.novoPedidoMotoboy(mb.id, p);
   res.json({ ok: true, motoboy_id: mb ? mb.id : null });
+}));
+
+// Chamada de motoboy (v1.16.43): a loja chama e TODOS os motoboys
+// ativos da empresa recebem; o primeiro que aceitar fica com o pedido
+// e a chamada some da lista dos outros (o aceite é atômico).
+app.post('/api/painel/pedidos/:id/chamar-motoboy', auth, soAdmin, h(async (req, res) => {
+  const p = await pedidosCore.getPedido(Number(req.params.id));
+  if (!p) return res.status(404).json({ erro: 'Pedido não encontrado.' });
+  if (p.tipo !== 'entrega') return res.status(422).json({ erro: 'Só pedido de entrega chama motoboy.' });
+  if (['SAIU_ENTREGA', 'ENTREGUE', 'CANCELADO'].includes(p.status)) return res.status(422).json({ erro: 'Não dá pra chamar motoboy neste status.' });
+  if (p.motoboy_id) return res.status(422).json({ erro: 'Este pedido já tem motoboy.' });
+  if (p.chamada_motoboy) return res.json({ ok: true, ja_chamado: true });
+  await run('UPDATE pedidos SET chamada_motoboy=1 WHERE id=?', p.id);
+  await run('INSERT INTO pedido_status_historico (pedido_id, de_status, para_status, origem, motivo, autor) VALUES (?, ?, ?, ?, ?, ?)', p.id, p.status, p.status, 'painel', 'Chamada aberta para os motoboys', req.usuario.nome);
+  const mbs = await all(`SELECT id FROM usuarios WHERE loja_id=${lid()} AND perfil='motoboy' AND ativo=1`);
+  for (const mb of mbs) pushPainel.chamadaMotoboy(mb.id, p);
+  res.json({ ok: true });
+}));
+app.post('/api/painel/pedidos/:id/cancelar-chamada', auth, soAdmin, h(async (req, res) => {
+  const p = await pedidosCore.getPedido(Number(req.params.id));
+  if (!p) return res.status(404).json({ erro: 'Pedido não encontrado.' });
+  await run('UPDATE pedidos SET chamada_motoboy=0 WHERE id=? AND motoboy_id IS NULL', p.id);
+  res.json({ ok: true });
 }));
 
 // ---------------- Push do motoboy (v1.16.24) ----------------
@@ -812,8 +882,17 @@ async function financeiroMotoboy(motoboyId) {
   const nEntregas = Number(entregas ? entregas.n : 0);
   const nDias = Number(dias ? dias.n : 0);
   const valor = modelo === 'por_entrega' ? Number(mb.valor_entrega_centavos || 0) : Number(mb.valor_diaria_centavos || 0);
-  const base = modelo === 'por_entrega' ? nEntregas : nDias;
-  const ganho = base * valor;
+  // 1.16.39: no por-entrega, o ganho é a SOMA dos repasses travados em cada
+  // entrega (repasse do bairro, ou a taxa do pedido quando o bairro não tem
+  // repasse). Entregas antigas sem repasse gravado usam o valor atual como
+  // fallback — igual ao cálculo de antes.
+  let ganho;
+  if (modelo === 'por_entrega') {
+    const soma = await get(`SELECT COALESCE(SUM(COALESCE(repasse_motoboy_centavos, ?)),0) AS t FROM pedidos WHERE loja_id=${lid()} AND motoboy_id=? AND status='ENTREGUE'`, valor, motoboyId);
+    ganho = Number(soma ? soma.t : 0);
+  } else {
+    ganho = nDias * valor;
+  }
   const pago = Number(pagos ? pagos.t : 0);
   return {
     motoboy: { id: mb.id, nome: mb.nome, login: mb.login, ativo: mb.ativo },

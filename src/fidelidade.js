@@ -384,10 +384,23 @@ async function listarSorteios() {
   return all('SELECT * FROM sorteios WHERE loja_id=1 ORDER BY id DESC LIMIT 30');
 }
 
+// Minha conta (v1.16.33): últimos sorteados — do servidor sai SÓ o
+// primeiro nome, nunca o WhatsApp nem o nome completo.
+async function ultimosSorteados(limite = 5) {
+  const lim = Math.min(10, Math.max(1, Number(limite) || 5));
+  const lista = await all(`SELECT ganhador_nome, premio_texto, periodo_fim FROM sorteios WHERE loja_id=1 AND status='sorteado' AND ganhador_nome IS NOT NULL AND ganhador_nome<>'' ORDER BY id DESC LIMIT ${lim}`);
+  return lista.map((s) => ({
+    nome: String(s.ganhador_nome).trim().split(/\s+/)[0] || '?',
+    premio: s.premio_texto,
+    mes: s.periodo_fim ? String(s.periodo_fim).slice(0, 7) : null,
+  }));
+}
+
 module.exports = {
   preparar, criarTabelas, getConfig, salvarConfig, statusCliente,
   premioResgatavel, consumirPremio, aoTransicionar,
   listarPremios, ranking, resgatarManual, removerPremio, TEXTO_ENTREGA_GRATIS,
   participantes, sortear, listarSorteios, concederPremioAvulso,
   sorteioAtivo, sorteioPorId, criarSorteio, encerrarSorteio, sortearAgora, participantesDoSorteio,
+  ultimosSorteados,
 };

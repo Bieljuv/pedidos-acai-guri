@@ -9,13 +9,13 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<'
 const fmtBRL = (c) => 'R$ ' + (Number(c || 0) / 100).toFixed(2).replace('.', ',');
 const STATUS_ROTULO = { NOVO: 'Novo', EM_PREPARO: 'Em preparo', PRONTO: 'Pronto para retirar', SAIU_ENTREGA: 'A caminho' };
 
-let token = null, nome = null, pollTimer = null, ultimoMapa = {}, primeiraCarga = true;
+let token = null, nome = null, pollTimer = null, ultimoMapa = {}, ultimasChamadas = {}, primeiraCarga = true;
 try { token = localStorage.getItem('motoboy_token'); nome = localStorage.getItem('motoboy_nome'); } catch { /* sem storage */ }
 
 async function api(path, opts) {
   const r = await fetch(path, {
     method: (opts && opts.method) || 'GET',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token, 'x-sessao': token } : {}) },
     body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const d = await r.json().catch(() => ({}));
@@ -169,7 +169,7 @@ async function abrirFinanceiro() {
     const fin = await api('/api/motoboy/financeiro');
     const valorCfg = fin.modelo === 'por_entrega' ? fin.valor_entrega_centavos : fin.valor_diaria_centavos;
     $('#finModelo').textContent = fin.modelo === 'por_entrega'
-      ? (valorCfg ? `Você recebe ${fmtBRL(valorCfg)} por entrega finalizada.` : 'Pagamento por entrega — a loja ainda não definiu o valor.')
+      ? 'Você recebe o repasse definido em Bairros e Taxas por entrega finalizada.'
       : (valorCfg ? `Você recebe ${fmtBRL(valorCfg)} por dia trabalhado.` : 'Pagamento por diária — a loja ainda não definiu o valor.');
     $('#finTotais').innerHTML = `
       <div class="fin-linha"><span>Entregas finalizadas</span><span>${fin.entregas_finalizadas}</span></div>
@@ -255,6 +255,35 @@ function renderPedidos(lista) {
   }).join('');
   $$('#listaPedidos [data-acao]').forEach(b => b.addEventListener('click', () => acaoPedido(b.dataset.acao, Number(b.dataset.id))));
 }
+function renderChamadas(lista) {
+  const box = $('#listaChamadas');
+  if (!box) return;
+  if (!lista.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="chamadas-titulo">Chamadas abertas — quem aceitar primeiro fica com a entrega</div>` + lista.map(p => {
+    const tel = String(p.cliente_whatsapp || '').replace(/\D/g, '');
+    return `<article class="card chamada">
+      <div class="ped-top"><span class="ped-num">#${p.numero}</span><span class="chip">Chamada aberta</span></div>
+      <div class="ped-cliente">${esc(p.cliente_nome || 'Cliente')}</div>
+      <div class="ped-end">${esc(enderecoTexto(p))}${tel ? ` · <a target="_blank" rel="noopener" href="https://wa.me/${tel}">Chamar no WhatsApp</a>` : ''}</div>
+      <div class="ped-itens">${itensHtml(p)}</div>
+      ${p.observacao ? `<div class="ped-itens"><div class="obs">OBS do pedido: ${esc(p.observacao)}</div></div>` : ''}
+      <div class="ped-totais">
+        <div class="linha"><span>Subtotal</span><span>${fmtBRL(p.subtotal_centavos)}</span></div>
+        <div class="linha"><span>Taxa de entrega</span><span>${fmtBRL(p.taxa_entrega_centavos)}</span></div>
+        ${p.desconto_centavos ? `<div class="linha"><span>Desconto</span><span>− ${fmtBRL(p.desconto_centavos)}</span></div>` : ''}
+        <div class="linha total"><span>Total (${esc(p.forma_pagamento || '')})</span><span>${fmtBRL(p.total_centavos)}</span></div>
+      </div>
+      <button class="btn btn-primario" data-chamada-aceitar="${p.id}" style="width:100%;margin-top:.6rem">Aceitar entrega</button>
+    </article>`;
+  }).join('');
+  $$('#listaChamadas [data-chamada-aceitar]').forEach(b => b.addEventListener('click', () => acaoChamada(Number(b.dataset.chamadaAceitar))));
+}
+async function acaoChamada(id) {
+  try {
+    await api(`/api/motoboy/chamadas/${id}/aceitar`, { method: 'POST' });
+    await carregarPedidos();
+  } catch (err) { alert(err.message); await carregarPedidos(); }
+}
 async function acaoPedido(acao, id) {
   try {
     if (acao === 'aceitar') { await api(`/api/motoboy/pedidos/${id}/aceitar`, { method: 'POST' }); }
@@ -272,6 +301,7 @@ async function acaoPedido(acao, id) {
 }
 async function carregarPedidos() {
   if (!token) return;
+  const eraPrimeira = primeiraCarga;
   try {
     const lista = await api('/api/motoboy/pedidos');
     const novoMapa = {};
@@ -288,6 +318,15 @@ async function carregarPedidos() {
     primeiraCarga = false;
     ultimoMapa = novoMapa;
     renderPedidos(lista);
+    // Chamadas abertas (v1.16.37): chegam para todos os motoboys; quem
+    // aceitar primeiro fica com o pedido. Som de chegada igual ao de
+    // pedido novo, só depois da primeira carga.
+    try {
+      const chamadas = await api('/api/motoboy/chamadas');
+      if (!eraPrimeira) chamadas.forEach(c => { if (!(c.id in ultimasChamadas)) tocar(somRec, 'motoboy_som_recebimento'); });
+      ultimasChamadas = {}; chamadas.forEach(c => { ultimasChamadas[c.id] = 1; });
+      renderChamadas(chamadas);
+    } catch { /* sem chamadas */ }
     $('#atualizadoEm').textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   } catch (err) {
     if (err.status === 401) sair('Sessão expirada. Entre de novo.');

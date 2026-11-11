@@ -178,5 +178,18 @@ async function pedidoProntoMotoboy(motoboyId, pedido) {
     });
   } catch (e) { console.error('[push] pedidoProntoMotoboy:', e.message); }
 }
+// Chamada de motoboy (v1.16.43): vai para TODOS os motoboys da empresa;
+// quem aceitar primeiro fica com o pedido (o aceite atômico tira a
+// chamada da lista dos outros).
+async function chamadaMotoboy(motoboyId, pedido) {
+  try {
+    await enviarParaUsuario(motoboyId, {
+      titulo: `Chamada: pedido #${pedido.numero} precisa de motoboy`,
+      corpo: `${pedido.cliente_nome || 'Cliente'} — quem aceitar primeiro fica com a entrega.`,
+      url: '/motoboy',
+      tag: `motoboy-chamada-${pedido.id}`,
+    });
+  } catch (e) { console.error('[push] chamadaMotoboy:', e.message); }
+}
 
-module.exports = { preparar, chavePublica, inscrever, desinscrever, enviarParaTodos, enviarParaUsuario, novoPedido, novoPedidoMotoboy, pedidoProntoMotoboy, testar };
+module.exports = { preparar, chavePublica, inscrever, desinscrever, enviarParaTodos, enviarParaUsuario, novoPedido, novoPedidoMotoboy, pedidoProntoMotoboy, chamadaMotoboy, testar };

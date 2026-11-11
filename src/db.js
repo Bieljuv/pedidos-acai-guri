@@ -217,6 +217,12 @@ if (MODO === 'sqlite') {
   try { sq.exec(`ALTER TABLE usuarios ADD COLUMN modelo_pagamento TEXT DEFAULT 'diaria'`); } catch { /* coluna já existe */ }
   try { sq.exec('ALTER TABLE usuarios ADD COLUMN valor_entrega_centavos INTEGER DEFAULT 0'); } catch { /* coluna já existe */ }
   try { sq.exec('ALTER TABLE usuarios ADD COLUMN valor_diaria_centavos INTEGER DEFAULT 0'); } catch { /* coluna já existe */ }
+  // v1.16.39: repasse do motoboy por bairro (vazio = taxa cheia) + repasse
+  // travado em cada pedido na hora da entrega.
+  try { sq.exec('ALTER TABLE bairros ADD COLUMN repasse_motoboy_centavos INTEGER'); } catch { /* coluna já existe */ }
+  try { sq.exec('ALTER TABLE pedidos ADD COLUMN repasse_motoboy_centavos INTEGER'); } catch { /* coluna já existe */ }
+  // v1.16.43: chamada de motoboy (1 = chamada aberta para todos).
+  try { sq.exec('ALTER TABLE pedidos ADD COLUMN chamada_motoboy INTEGER DEFAULT 0'); } catch { /* coluna já existe */ }
   try { sq.exec(`CREATE TABLE IF NOT EXISTS motoboy_pagamentos (
     id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL DEFAULT 1,
     motoboy_id INTEGER NOT NULL, valor_centavos INTEGER NOT NULL DEFAULT 0,
@@ -544,6 +550,9 @@ async function init() {
   await pool.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS modelo_pagamento TEXT DEFAULT 'diaria'`);
   await pool.query('ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS valor_entrega_centavos INTEGER DEFAULT 0');
   await pool.query('ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS valor_diaria_centavos INTEGER DEFAULT 0');
+  await pool.query('ALTER TABLE bairros ADD COLUMN IF NOT EXISTS repasse_motoboy_centavos INTEGER');
+  await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS repasse_motoboy_centavos INTEGER');
+  await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS chamada_motoboy INTEGER DEFAULT 0');
   await pool.query(`CREATE TABLE IF NOT EXISTS motoboy_pagamentos (
     id SERIAL PRIMARY KEY, loja_id INTEGER NOT NULL DEFAULT 1,
     motoboy_id INTEGER NOT NULL, valor_centavos INTEGER NOT NULL DEFAULT 0,

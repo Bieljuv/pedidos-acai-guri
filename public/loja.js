@@ -239,10 +239,12 @@ $('#pdn-form').addEventListener('submit', async (e) => {
     msg.hidden = false;
   }
 });
-$('#btn-peca-de-novo').addEventListener('click', () => {
-  if (!ultimoPedidoCache) return;
+/* Remonta itens antigos no carrinho (Peça de novo e Minha conta):
+   casa opção pelo NOME no cardápio atual, pula o que não existe mais
+   ou perdeu o obrigatório, e precifica pelo cardápio atual. */
+function remontarItens(itens) {
   let adicionados = 0, pulados = 0;
-  for (const it of ultimoPedidoCache.itens) {
+  for (const it of itens) {
     const produto = produtosPorId.get(it.produto_id);
     if (!produto || produto.esgotado) { pulados++; continue; }
     const ids = [];
@@ -267,10 +269,15 @@ $('#btn-peca-de-novo').addEventListener('click', () => {
     else carrinho.push(item);
     adicionados++;
   }
-  if (!adicionados) { toast('Os itens do último pedido não estão mais disponíveis.'); return; }
+  return { adicionados, pulados };
+}
+$('#btn-peca-de-novo').addEventListener('click', () => {
+  if (!ultimoPedidoCache) return;
+  const r = remontarItens(ultimoPedidoCache.itens);
+  if (!r.adicionados) { toast('Os itens do último pedido não estão mais disponíveis.'); return; }
   salvarCarrinho();
   abrirCarrinho();
-  toast((pulados ? 'Pedido montado — alguns itens não estão mais no cardápio e ficaram de fora.' : 'Seu pedido de sempre está no carrinho!') + avisoFecharTexto());
+  toast((r.pulados ? 'Pedido montado — alguns itens não estão mais no cardápio e ficaram de fora.' : 'Seu pedido de sempre está no carrinho!') + avisoFecharTexto());
 });
 
 /* ---------- cabeçalho: transição de cor dirigida pela rolagem ---------- */
@@ -1632,3 +1639,187 @@ document.addEventListener('DOMContentLoaded', iniciar);
     if (deep && meta) meta.setAttribute('content', deep);
   } catch { /* visual apenas */ }
 })();
+
+/* ============================================================
+   MINHA CONTA (v1.16.33, só WhatsApp, sem senha)
+   A conta abre pelo número — mesmo modelo do Peça de novo — e
+   mostra os dados da entrega, as últimas compras, as promoções
+   e os sorteios. Os dados editados aqui são os mesmos que o
+   checkout preenche sozinho.
+   ============================================================ */
+const CONTA_STATUS = { NOVO: 'Recebido', EM_PREPARO: 'Em preparo', PRONTO: 'Pronto', SAIU_ENTREGA: 'Saiu pra entrega', ENTREGUE: 'Entregue', CANCELADO: 'Cancelado' };
+const CONTA_MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+function contaDataCurta(iso) {
+  const s = String(iso || '');
+  return s.length >= 10 ? `${s.slice(8, 10)}/${s.slice(5, 7)}` : '';
+}
+function contaMesBR(mes) {
+  const m = String(mes || '').match(/^(\d{4})-(\d{2})$/);
+  if (!m) return '';
+  return `${CONTA_MESES[Number(m[2]) - 1]} de ${m[1]}`;
+}
+function contaClienteSalvo() {
+  try { return JSON.parse(localStorage.getItem('loja_cliente') || '{}'); } catch { return {}; }
+}
+function abrirConta() {
+  const salvo = contaClienteSalvo();
+  $('#conta-gate-msg').hidden = true;
+  if (salvo.whatsapp) {
+    $('#conta-gate').hidden = true;
+    $('#conta-conteudo').hidden = false;
+    carregarConta(salvo.whatsapp);
+  } else {
+    $('#conta-gate').hidden = false;
+    $('#conta-conteudo').hidden = true;
+    $('#conta-fone').value = '';
+    setTimeout(() => $('#conta-fone').focus(), 50);
+  }
+  abrirOverlay('conta');
+}
+$('#hdr-conta').addEventListener('click', abrirConta);
+$('#conta-fone').addEventListener('input', mascaraFoneInput);
+$('#conta-gate-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const digitos = soDigitos($('#conta-fone').value);
+  const msg = $('#conta-gate-msg');
+  if (digitos.length < 10) { msg.textContent = 'Digite seu WhatsApp com DDD.'; msg.hidden = false; return; }
+  msg.hidden = true;
+  const salvo = contaClienteSalvo();
+  salvo.whatsapp = digitos;
+  try { localStorage.setItem('loja_cliente', JSON.stringify(salvo)); } catch {}
+  $('#conta-gate').hidden = true;
+  $('#conta-conteudo').hidden = false;
+  carregarConta(digitos);
+});
+async function carregarConta(whats) {
+  renderContaDados();
+  $('#conta-pedidos').innerHTML = '<p class="conta-nota">Carregando…</p>';
+  $('#conta-promos').innerHTML = '<p class="conta-nota">Carregando…</p>';
+  $('#conta-sorteios').innerHTML = '<p class="conta-nota">Carregando…</p>';
+  const dig = soDigitos(whats);
+  try {
+    const [ped, fid, cup, sor] = await Promise.all([
+      getJSON('/api/public/meus-pedidos/' + dig).catch(() => ({ pedidos: [] })),
+      getJSON('/api/public/fidelidade/' + dig).catch(() => ({ ativo: false })),
+      getJSON('/api/public/cupons-ativos').catch(() => ({ cupons: [] })),
+      getJSON('/api/public/sorteados').catch(() => ({ sorteados: [] })),
+    ]);
+    renderContaPedidos(ped.pedidos || []);
+    renderContaPromos(fid, cup.cupons || []);
+    renderContaSorteios(sor.sorteados || []);
+  } catch {
+    $('#conta-pedidos').innerHTML = '<p class="conta-nota">Não consegui carregar agora. Tenta de novo em instantes.</p>';
+  }
+}
+function renderContaDados() {
+  const s = contaClienteSalvo();
+  const bairro = (bairros || []).find((b) => String(b.id) === String(s.bairro_id));
+  const linhas = [];
+  if (s.nome) linhas.push(`<b>${esc(s.nome)}</b>`);
+  if (s.whatsapp) linhas.push(esc(mascararFone(s.whatsapp)));
+  const end = [s.rua ? `${s.rua}, ${s.numero || 's/n'}` : '', bairro ? bairro.bairro : ''].filter(Boolean).join(' — ');
+  if (end) linhas.push(esc(end));
+  if (s.complemento) linhas.push(esc(s.complemento));
+  if (s.referencia) linhas.push(esc(s.referencia));
+  $('#conta-dados').innerHTML = linhas.length
+    ? `<div class="conta-dados-linha">${linhas.join('<br>')}</div>`
+    : '<p class="conta-nota">Você ainda não salvou seus dados. Toque em Editar para preencher.</p>';
+}
+$('#btn-conta-editar').addEventListener('click', () => {
+  const s = contaClienteSalvo();
+  $('#conta-nome').value = s.nome || '';
+  $('#conta-rua').value = s.rua || '';
+  $('#conta-numero').value = s.numero || '';
+  $('#conta-complemento').value = s.complemento || '';
+  $('#conta-referencia').value = s.referencia || '';
+  const sel = $('#conta-bairro');
+  sel.innerHTML = '';
+  const op0 = document.createElement('option');
+  op0.value = ''; op0.textContent = 'Selecione seu bairro…';
+  sel.appendChild(op0);
+  for (const b of (bairros || [])) {
+    const op = document.createElement('option');
+    op.value = b.id; op.textContent = b.bairro;
+    sel.appendChild(op);
+  }
+  if (s.bairro_id) sel.value = s.bairro_id;
+  $('#conta-dados-form').hidden = false;
+});
+$('#btn-conta-cancelar-edicao').addEventListener('click', () => { $('#conta-dados-form').hidden = true; });
+$('#conta-dados-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const nome = $('#conta-nome').value.trim();
+  const rua = $('#conta-rua').value.trim();
+  const numero = $('#conta-numero').value.trim();
+  if (!nome || !rua || !numero) { toast('Preencha nome, rua e número.'); return; }
+  const s = contaClienteSalvo();
+  s.nome = nome; s.rua = rua; s.numero = numero;
+  s.complemento = $('#conta-complemento').value.trim();
+  s.referencia = $('#conta-referencia').value.trim();
+  const bid = $('#conta-bairro').value;
+  if (bid) s.bairro_id = bid; else delete s.bairro_id;
+  try { localStorage.setItem('loja_cliente', JSON.stringify(s)); } catch {}
+  $('#conta-dados-form').hidden = true;
+  renderContaDados();
+  toast('Dados salvos.');
+});
+let contaPedidosCache = [];
+function renderContaPedidos(pedidos) {
+  contaPedidosCache = pedidos;
+  const cont = $('#conta-pedidos');
+  if (!pedidos.length) { cont.innerHTML = '<p class="conta-nota">Você ainda não tem compras por aqui.</p>'; return; }
+  cont.innerHTML = pedidos.map((p, i) => {
+    const itens = (p.itens || []).map((it) => `${it.quantidade}× ${it.nome_snapshot}`).join(', ');
+    const aberto = ['NOVO', 'EM_PREPARO', 'PRONTO', 'SAIU_ENTREGA'].includes(p.status);
+    return `<div class="conta-pedido">
+      <div class="conta-pedido-topo"><b>Pedido #${p.numero}</b><span>${contaDataCurta(p.created_at)}</span></div>
+      <div><span class="conta-pedido-status${p.status === 'CANCELADO' ? ' cancelado' : ''}">${esc(CONTA_STATUS[p.status] || p.status)}</span> · <b>${R$(p.total_centavos)}</b></div>
+      ${itens ? `<div class="conta-pedido-itens">${esc(itens)}</div>` : ''}
+      <div class="conta-pedido-acoes">
+        <button type="button" class="btn-mini" data-conta-pedir="${i}">Pedir de novo</button>
+        ${aberto ? `<button type="button" class="btn-mini" data-conta-acomp="${i}">Acompanhar</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  cont.querySelectorAll('[data-conta-pedir]').forEach((b) => b.addEventListener('click', () => {
+    const p = contaPedidosCache[Number(b.dataset.contaPedir)];
+    if (!p) return;
+    const r = remontarItens(p.itens || []);
+    if (!r.adicionados) { toast('Os itens desse pedido não estão mais disponíveis.'); return; }
+    salvarCarrinho();
+    fecharOverlay('conta');
+    abrirCarrinho();
+    toast((r.pulados ? 'Pedido montado — alguns itens não estão mais no cardápio e ficaram de fora.' : 'Seu pedido de sempre está no carrinho!') + avisoFecharTexto());
+  }));
+  cont.querySelectorAll('[data-conta-acomp]').forEach((b) => b.addEventListener('click', () => {
+    const p = contaPedidosCache[Number(b.dataset.contaAcomp)];
+    if (!p || !p.token) return;
+    fecharOverlay('conta');
+    irParaAcompanhamento(p.token);
+  }));
+}
+function renderContaPromos(fid, cupons) {
+  const cont = $('#conta-promos');
+  const blocos = [];
+  if (fid && fid.ativo) {
+    if (fid.premio_disponivel) blocos.push(`<div class="conta-promo"><b>Prêmio disponível!</b><p>${esc(fid.premio_texto || 'Você tem um prêmio esperando.')}</p></div>`);
+    else if (fid.meta) blocos.push(`<div class="conta-promo"><b>Fidelidade: ${fid.compras} de ${fid.meta}</b><p>${fid.faltam > 0 ? `Faltam ${fid.faltam} para o seu prêmio — ${esc(fid.premio_texto || '')}.` : esc(fid.premio_texto || '')}</p></div>`);
+  }
+  for (const c of cupons) {
+    const desc = c.tipo === 'percentual' ? `${c.valor}% OFF` : `${R$(c.valor)} OFF`;
+    blocos.push(`<div class="conta-promo"><b>Cupom ${esc(c.codigo)} — ${desc}</b><p>${c.minimo_centavos > 0 ? `Vale em pedidos a partir de ${R$(c.minimo_centavos)}. É só aplicar no checkout.` : 'É só aplicar no checkout.'}</p></div>`);
+  }
+  cont.innerHTML = blocos.length ? blocos.join('') : '<p class="conta-nota">Nenhuma promoção ativa no momento.</p>';
+}
+function renderContaSorteios(sorteados) {
+  const cont = $('#conta-sorteios');
+  const partes = [];
+  if (sorteioAtivoLoja) partes.push(`<p class="conta-texto"><b>Sorteio rolando:</b> ${esc(sorteioAtivoLoja.titulo)} — prêmio: <b>${esc(sorteioAtivoLoja.premio)}</b>. Cada pedido entregue vale 1 chance.</p>`);
+  if (sorteados.length) {
+    partes.push('<p class="conta-texto"><b>Últimos sorteados:</b></p>');
+    partes.push(sorteados.map((s) => `<div class="conta-sorteado"><span class="conta-trofeu">${icLoja('trophy')}</span><span><b>${esc(s.nome)}</b> — ganhou ${esc(s.premio)}${s.mes ? ` (${contaMesBR(s.mes)})` : ''}</span></div>`).join(''));
+  } else if (!sorteioAtivoLoja) {
+    partes.push('<p class="conta-nota">Nenhum sorteio no momento.</p>');
+  }
+  cont.innerHTML = partes.join('');
+}

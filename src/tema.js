@@ -66,10 +66,36 @@ function paleta(primaria, destaque) {
     '--linha': P(p.h, Math.min(45, p.s * 0.45), 90),
   };
 }
+// 1.16.38: o modo escuro NÃO puxava as cores do usuário porque o bloco
+// escuro do CSS base (`:root[data-tema="escuro"]`, especificidade maior)
+// vencia o `:root` gerado aqui e fixava roxo nas superfícies. Quando a
+// loja TEM cores próprias, o tema.css passa a emitir também o bloco
+// escuro derivado delas — mesma especificidade, carregado DEPOIS, vence.
+// Sem cores próprias, sai só o bloco claro de sempre (nada muda).
+function paletaEscura(primaria, destaque) {
+  if (!validaHex(primaria) && !validaHex(destaque)) return null;
+  const p = hexParaHsl(validaHex(primaria) ? primaria : PADRAO.primaria) || hexParaHsl(PADRAO.primaria);
+  const P = (h, s, l) => hslParaHex(h, s, l);
+  return {
+    '--bg': P(p.h, Math.min(100, p.s + 3), 7),
+    '--card': P(p.h, Math.min(100, p.s + 3), 12),
+    '--card2': P(p.h, Math.min(100, p.s + 3), 18),
+    '--ink': P(p.h, Math.min(60, p.s * 0.6), 94),
+    '--ink-suave': P(p.h, Math.min(60, p.s * 0.6), 78),
+    '--muted': P(p.h, Math.min(60, p.s * 0.6), 82),
+    '--linha': P(p.h, Math.min(45, p.s * 0.45), 22),
+  };
+}
 function cssDoTema(primaria, destaque) {
   const vars = paleta(primaria, destaque);
   const corpo = Object.entries(vars).map(([k, v]) => `  ${k}: ${v};`).join('\n');
-  return `:root{\n${corpo}\n}\n`;
+  let css = `:root{\n${corpo}\n}\n`;
+  const escura = paletaEscura(primaria, destaque);
+  if (escura) {
+    const corpoEscuro = Object.entries(escura).map(([k, v]) => `  ${k}: ${v};`).join('\n');
+    css += `:root[data-tema="escuro"]{\n${corpoEscuro}\n}\n`;
+  }
+  return css;
 }
 
 module.exports = { PADRAO, paleta, cssDoTema, validaHex };

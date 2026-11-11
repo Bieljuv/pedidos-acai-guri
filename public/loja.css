@@ -529,6 +529,10 @@ body.rolou .hnome{opacity:1;transform:none}
   --ink:#F4EAF7;
   --ink-suave:#C9A9D1;
   --linha:#3D1240;
+  /* 1.16.38: superfícies do escuro como vars — o tema.css as sobrescreve
+     quando a loja tem cores próprias; sem cores, valem estes mesmos tons. */
+  --card:var(--card);
+  --card2:var(--card2);
 }
 :root[data-tema="escuro"] .tema-seg{background:#2A0730}
 :root[data-tema="escuro"] .codigo-box{background:linear-gradient(120deg,#34104a,#3d0a45);border-color:#DB04E2}
@@ -539,7 +543,7 @@ body.rolou .hnome{opacity:1;transform:none}
 :root[data-tema="escuro"] .opcao,
 :root[data-tema="escuro"] .campo input,
 :root[data-tema="escuro"] .campo select,
-:root[data-tema="escuro"] .sheet{background:#24062A}
+:root[data-tema="escuro"] .sheet{background:var(--card)}
 /* Superficies que FALTAVAM no escuro (v1.16.5 — o Gabriel mostrou com
    prints: acompanhamento e Peca de novo brancos com texto invisivel):
    tinham fundo claro FIXO e texto herdado; no escuro o texto clareia
@@ -553,13 +557,13 @@ body.rolou .hnome{opacity:1;transform:none}
 :root[data-tema="escuro"] .resumo,
 :root[data-tema="escuro"] .qtd-controle,
 :root[data-tema="escuro"] .pag-online-aviso,
-:root[data-tema="escuro"] .pagamento-box{background:#24062A}
+:root[data-tema="escuro"] .pagamento-box{background:var(--card)}
 :root[data-tema="escuro"] .moto-legenda{color:var(--destaque-claro, #F2C1F7)}
-:root[data-tema="escuro"] .chip{background:#24062A}
-:root[data-tema="escuro"] .opcao.selecionada{background:#3A0A40}
-:root[data-tema="escuro"] .op-marcador{background:#24062A}
-:root[data-tema="escuro"] .btn-fechar{background:#3A0A40}
-:root[data-tema="escuro"] .selo-esgotado{background:#3A0A40; color:#C9A9D1}
+:root[data-tema="escuro"] .chip{background:var(--card)}
+:root[data-tema="escuro"] .opcao.selecionada{background:var(--card2)}
+:root[data-tema="escuro"] .op-marcador{background:var(--card)}
+:root[data-tema="escuro"] .btn-fechar{background:var(--card2)}
+:root[data-tema="escuro"] .selo-esgotado{background:var(--card2); color:#C9A9D1}
 :root[data-tema="escuro"] .card-produto,
 :root[data-tema="escuro"] .opcao{color:var(--ink)}
 /* Segunda varredura do escuro (v1.16.13 — print do Gabriel na
@@ -567,11 +571,11 @@ body.rolou .hnome{opacity:1;transform:none}
    cor herdada), o campo do cupom e o botao Aplicar ficavam BRANCOS,
    e o botao nao-selecionado do Entrega/Retirada idem. */
 :root[data-tema="escuro"] .pag-opcao{color:var(--ink)}
-:root[data-tema="escuro"] .pag-opcao.selecionada{background:#3A0A40}
-:root[data-tema="escuro"] .segmentado button:not(.seg-ativo){background:#3A0A40; color:var(--ink); border-color:#5A2A66}
+:root[data-tema="escuro"] .pag-opcao.selecionada{background:var(--card2)}
+:root[data-tema="escuro"] .segmentado button:not(.seg-ativo){background:var(--card2); color:var(--ink); border-color:#5A2A66}
 :root[data-tema="escuro"] .cupom-row input,
-:root[data-tema="escuro"] .pdn-form input{background:#24062A; color:var(--ink)}
-:root[data-tema="escuro"] .btn-secundario{background:#3A0A40; color:var(--ink); border-color:#8E44AD}
+:root[data-tema="escuro"] .pdn-form input{background:var(--card); color:var(--ink)}
+:root[data-tema="escuro"] .btn-secundario{background:var(--card2); color:var(--ink); border-color:#8E44AD}
 :root[data-tema="escuro"] input::placeholder,
 :root[data-tema="escuro"] textarea::placeholder{color:#A58BB0}
 :root[data-tema="escuro"] .sheet{scrollbar-color:#5A2A66 #24062A}
@@ -652,7 +656,7 @@ body.rolou .hnome{opacity:1;transform:none}
 .push-sorteio-txt > strong{ font-size:.95rem; }
 .push-sorteio-x{ flex:none; border:0; background:transparent; color:var(--ink-suave); cursor:pointer; padding:2px; display:flex; }
 .push-sorteio-x .ic{ width:18px; height:18px; }
-:root[data-tema="escuro"] .push-sorteio{ background:#24062A; }
+:root[data-tema="escuro"] .push-sorteio{ background:var(--card); }
 .ck-sorteio{background:#fdf3e3;border:1px solid #f0cf8f;color:#6b4a08;border-radius:10px;padding:10px 12px;font-size:.9rem;line-height:1.45;margin:2px 0 6px}
 .ck-sorteio .ic{width:16px;height:16px;vertical-align:-2px}
 :root[data-tema="escuro"] .ck-sorteio{background:#33230a;border-color:#8a6d2f;color:#f5d9a0}
@@ -681,3 +685,31 @@ body.loja-fechada #montador-adicionar:disabled { opacity: .5; pointer-events: no
 .card-produto{ content-visibility:auto; contain-intrinsic-size:auto 118px; }
 .btn, .card-produto, .chip, button, a{ touch-action:manipulation; }
 *{ -webkit-tap-highlight-color:transparent; }
+
+/* Minha conta (v1.16.33, só WhatsApp, sem senha) */
+#hdr-conta{margin-left:0}
+.sheet-conta{max-height:88dvh; overflow-y:auto}
+.conta-secao{margin-top:22px}
+.conta-secao h3{margin:0 0 10px; font-size:16px}
+.conta-secao-topo{display:flex; align-items:center; justify-content:space-between; gap:10px}
+.conta-secao-topo h3{margin:0}
+.conta-texto{opacity:.8; margin:0 0 12px}
+.conta-dados-linha{line-height:1.6}
+.conta-nota{font-size:13px; opacity:.75; margin:10px 0 0}
+.conta-grid-2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.conta-pedido{border-top:1px solid var(--linha); padding:10px 0}
+.conta-pedido:first-child{border-top:0; padding-top:0}
+.conta-pedido-topo{display:flex; justify-content:space-between; gap:8px; align-items:baseline}
+.conta-pedido-status{font-size:13px; font-weight:700; color:#1d9e57}
+.conta-pedido-status.cancelado{color:var(--vermelho)}
+.conta-pedido-itens{font-size:13px; opacity:.8; margin-top:2px}
+.conta-pedido-acoes{display:flex; gap:8px; margin-top:8px; flex-wrap:wrap}
+.conta-promo{background:linear-gradient(135deg, #7b1d8f, #5c1470); color:#fff; border-radius:12px; padding:12px; margin-bottom:10px}
+.conta-promo:last-child{margin-bottom:0}
+.conta-promo b{font-size:15px}
+.conta-promo p{margin:4px 0 0; font-size:13px; opacity:.92}
+.conta-sorteado{display:flex; gap:10px; align-items:center; padding:8px 0; border-top:1px solid var(--linha)}
+.conta-sorteado:first-child{border-top:0; padding-top:0}
+.conta-trofeu{width:30px; height:30px; border-radius:50%; background:#f7e9a8; display:flex; align-items:center; justify-content:center; flex:none}
+.form-actions{display:flex; gap:10px; margin-top:14px; flex-wrap:wrap}
+.btn-mini{border:1.5px solid var(--primary); color:var(--primary); background:transparent; border-radius:999px; padding:7px 13px; font-size:13px; font-weight:800; cursor:pointer}

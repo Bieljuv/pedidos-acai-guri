@@ -119,4 +119,18 @@ async function remover(id) {
   return { ok: true };
 }
 
-module.exports = { preparar, validar, listar, criar, definirAtivo, remover, normalizaCodigo };
+// Minha conta (v1.16.33): cupons ativos e válidos, para a vitrine
+// mostrar como promoções (mesma regra do validar, sem o subtotal).
+async function ativos() {
+  const lista = await all(`SELECT codigo, tipo, valor, minimo_centavos, expira_em, usos_max FROM cupons WHERE loja_id=${lid()} AND ativo=1 ORDER BY codigo`);
+  const hoje = hojeLocal();
+  const out = [];
+  for (const c of lista) {
+    if (c.expira_em && c.expira_em < hoje) continue;
+    if (c.usos_max != null && (await usosDoCupom(c.codigo)) >= Number(c.usos_max)) continue;
+    out.push({ codigo: c.codigo, tipo: c.tipo, valor: Number(c.valor) || 0, minimo_centavos: Number(c.minimo_centavos) || 0 });
+  }
+  return out;
+}
+
+module.exports = { preparar, validar, listar, criar, definirAtivo, remover, normalizaCodigo, ativos };

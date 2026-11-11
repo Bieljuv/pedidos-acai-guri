@@ -214,13 +214,13 @@ h3.view-h{margin-bottom:.4rem}
 /* formulários (recebimentos / loja) */
 .card-form{background:#fff;border:1px solid var(--linha);border-radius:14px;padding:1.1rem;margin-bottom:1rem;max-width:760px}
 .card-form h4{margin-bottom:.7rem}
-.uploads-row{display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:1rem;align-items:stretch}
+.uploads-row{display:flex;gap:1.2rem;flex-wrap:wrap;margin-bottom:1rem;align-items:flex-start}
 .upload-box{display:flex;flex-direction:column;gap:.45rem;align-items:flex-start;max-width:290px}
 .upload-titulo{font-size:.85rem;font-weight:700}
 .upload-preview{background:#f4ecf8;border:1px dashed #cbbbd4;object-fit:cover}
 .upload-preview.logo{width:190px;height:132px;border-radius:16px;object-fit:contain;background:#2A0530}
 .upload-preview.capa{width:230px;height:132px;border-radius:12px}
-.upload-acoes{display:flex;gap:8px;align-items:center;margin-top:auto}
+.upload-acoes{display:flex;gap:8px;align-items:center}
 .upload-acoes .btn{margin:0}
 .upload-box .dica{min-height:2.9em}
 .upload-btn{cursor:pointer}
@@ -408,11 +408,14 @@ tr.ponto-aberto td{background:#fdf3d8}
 /* ---------- Tema escuro do painel (data-tema="escuro" no <html>) ---------- */
 :root[data-tema="escuro"]{
   --bg:#170021; --ink:#f3e9f7; --card:#2b1038; --muted:#d8c4e6; --linha:#4a2a5e;
+  /* 1.16.38: superfícies do escuro como vars — o tema.css as sobrescreve
+     quando a loja tem cores próprias; sem cores, valem estes mesmos tons. */
+  --card2:#1e0229;
   color-scheme:dark;
 }
-:root[data-tema="escuro"] .topbar{background:#22002e;border-color:var(--linha)}
+:root[data-tema="escuro"] .topbar{background:var(--night);border-color:var(--linha)}
 :root[data-tema="escuro"] .topbar h2{color:#f6eef9}
-:root[data-tema="escuro"] .coluna{background:#2b1038}
+:root[data-tema="escuro"] .coluna{background:var(--card)}
 :root[data-tema="escuro"] .bloco,
 :root[data-tema="escuro"] .card-form,
 :root[data-tema="escuro"] .grupo-card,
@@ -421,21 +424,21 @@ tr.ponto-aberto td{background:#fdf3d8}
 :root[data-tema="escuro"] .prod-row,
 :root[data-tema="escuro"] .fin-form,
 :root[data-tema="escuro"] .fin-res-item{background:var(--card);border-color:var(--linha)}
-:root[data-tema="escuro"] .modal{background:#2b1038}
-:root[data-tema="escuro"] .drawer-body{background:#22002e}
-:root[data-tema="escuro"] .vazio{background:#2b1038;border-color:#5c3a72;color:var(--muted)}
+:root[data-tema="escuro"] .modal{background:var(--card)}
+:root[data-tema="escuro"] .drawer-body{background:var(--night)}
+:root[data-tema="escuro"] .vazio{background:var(--card);border-color:#5c3a72;color:var(--muted)}
 :root[data-tema="escuro"] input,
 :root[data-tema="escuro"] select,
-:root[data-tema="escuro"] textarea{background:#1e0229;border-color:#573a6e;color:#f3e9f7}
-:root[data-tema="escuro"] .copy-row input{background:#1e0229}
+:root[data-tema="escuro"] textarea{background:var(--card2);border-color:#573a6e;color:#f3e9f7}
+:root[data-tema="escuro"] .copy-row input{background:var(--card2)}
 :root[data-tema="escuro"] .btn-ghost{border-color:#573a6e;color:#f3e9f7}
 :root[data-tema="escuro"] .btn-ghost:hover{background:#3a1a4d}
 :root[data-tema="escuro"] .btn-warn{background:#3d2f05;color:#ffd968;border-color:#8a6d00}
-:root[data-tema="escuro"] .simple-table{background:#2b1038;border-color:var(--linha)}
+:root[data-tema="escuro"] .simple-table{background:var(--card);border-color:var(--linha)}
 :root[data-tema="escuro"] .simple-table th{background:#3a1a4d;color:var(--muted)}
 :root[data-tema="escuro"] .opcoes-table th,:root[data-tema="escuro"] .opcoes-table td{border-color:var(--linha)}
 :root[data-tema="escuro"] .cat-chip{background:#3a1a4d;border-color:var(--linha)}
-:root[data-tema="escuro"] .cat-chip .mini{background:#2b1038;border-color:#573a6e;color:#f3e9f7}
+:root[data-tema="escuro"] .cat-chip .mini{background:var(--card);border-color:#573a6e;color:#f3e9f7}
 :root[data-tema="escuro"] .selo{background:#3a1a4d;color:#e9d9f2}
 :root[data-tema="escuro"] .selo.entrega{background:#16294d;color:#9cc2ff}
 :root[data-tema="escuro"] .selo.retirada{background:#3d2f05;color:#ffd968}
@@ -448,7 +451,7 @@ tr.ponto-aberto td{background:#fdf3d8}
 :root[data-tema="escuro"] .cfg-result.ok{background:#0c3520;border-color:#1f6b41;color:#7fe3a8}
 :root[data-tema="escuro"] .cfg-result.erro{background:#3d1010;border-color:#7c2727;color:#ff9c9c}
 :root[data-tema="escuro"] .guia{background:#241033;border-color:var(--linha)}
-:root[data-tema="escuro"] .pausar-menu{background:#2b1038;border-color:var(--linha)}
+:root[data-tema="escuro"] .pausar-menu{background:var(--card);border-color:var(--linha)}
 :root[data-tema="escuro"] .pausar-menu button{color:#f3e9f7}
 :root[data-tema="escuro"] .pausar-menu button:hover{background:#3a1a4d}
 :root[data-tema="escuro"] .pausa-info{color:#ffd968}
@@ -460,7 +463,7 @@ tr.ponto-aberto td{background:#fdf3d8}
 :root[data-tema="escuro"] .fin-resultado{background:#241033}
 :root[data-tema="escuro"] .fin-lucro-op.pos{background:#0c3520;color:#7fe3a8}
 :root[data-tema="escuro"] .fin-lucro-op.neg{background:#3d1010;color:#ff9c9c}
-:root[data-tema="escuro"] .tema-seg{background:#2b1038;border-color:#573a6e}
+:root[data-tema="escuro"] .tema-seg{background:var(--card);border-color:#573a6e}
 :root[data-tema="escuro"] .tema-btn{color:#bfa9cc}
 :root[data-tema="escuro"] .tema-seg:not(.escuro) .tema-btn[data-tema-btn="claro"],
 :root[data-tema="escuro"] .tema-seg.escuro .tema-btn[data-tema-btn="escuro"]{color:#fff}
@@ -468,7 +471,7 @@ tr.ponto-aberto td{background:#fdf3d8}
 :root[data-tema="escuro"] .codigo-box .codigo-num{color:#fff}
 :root[data-tema="escuro"] .codigo-box .codigo-rot{color:#f0a5f5}
 :root[data-tema="escuro"] .pcard-pin{background:#34104a;border-color:#5c2d86;color:#f0a5f5}
-:root[data-tema="escuro"] .login-card{background:#2b1038;color:#f3e9f7}
+:root[data-tema="escuro"] .login-card{background:var(--card);color:#f3e9f7}
 :root[data-tema="escuro"] tr.ponto-aberto td{background:#3d2f05}
 :root[data-tema="escuro"] .upload-preview.logo{background:#170021}
 :root[data-tema="escuro"] .foto-edit img,:root[data-tema="escuro"] .prod-row img{background:#34104a}

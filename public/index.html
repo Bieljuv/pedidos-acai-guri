@@ -23,6 +23,9 @@
       <span id="hdr-nome" class="hnome">Açaí do Guri</span>
       <span id="hdr-status" class="hstatus">carregando…</span>
     </div>
+    <button id="hdr-conta" class="hcarrinho" type="button" aria-label="Minha conta">
+      <svg class="ic" aria-hidden="true" focusable="false"><use href="#i-user"></use></svg> <span class="hcarrinho-rotulo">Minha conta</span>
+    </button>
     <button id="hdr-carrinho" class="hcarrinho" type="button" aria-label="Ver meu pedido">
       <svg class="ic" aria-hidden="true" focusable="false"><use href="#i-cart"></use></svg> <span class="hcarrinho-rotulo">Meu pedido</span>
       <span id="hdr-badge" class="hbadge" hidden>0</span>
@@ -220,6 +223,61 @@
       <p id="ck-erro" class="erro-form" hidden></p>
       <button id="btn-confirmar" class="btn-primario btn-confirmar" type="submit">Confirmar pedido</button>
     </form>
+  </div>
+</div>
+
+<!-- ===== Minha conta (v1.16.33, só WhatsApp, sem senha) ===== -->
+<div id="overlay-conta" class="overlay" hidden>
+  <div class="sheet sheet-conta" role="dialog" aria-modal="true" aria-label="Minha conta">
+    <div class="sheet-topo">
+      <h2>Minha conta</h2>
+      <button class="btn-fechar" data-fechar="conta" type="button" aria-label="Fechar"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-x"></use></svg></button>
+    </div>
+    <div id="conta-gate">
+      <p class="conta-texto">Digite seu WhatsApp para abrir sua conta.</p>
+      <form id="conta-gate-form" class="pdn-form">
+        <input id="conta-fone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="Seu WhatsApp com DDD" maxlength="15">
+        <button type="submit" class="btn-primario">Entrar</button>
+      </form>
+      <p id="conta-gate-msg" class="erro-form" hidden></p>
+    </div>
+    <div id="conta-conteudo" hidden>
+      <div class="conta-secao">
+        <div class="conta-secao-topo">
+          <h3>Meus dados</h3>
+          <button type="button" class="btn-texto" id="btn-conta-editar">Editar</button>
+        </div>
+        <div id="conta-dados"></div>
+        <form id="conta-dados-form" hidden>
+          <label class="campo"><span>Seu nome *</span><input id="conta-nome" type="text" autocomplete="name" placeholder="Como podemos te chamar?"></label>
+          <label class="campo"><span>Rua *</span><input id="conta-rua" type="text" autocomplete="street-address" placeholder="Nome da rua"></label>
+          <div class="conta-grid-2">
+            <label class="campo"><span>Número *</span><input id="conta-numero" type="text" inputmode="numeric" placeholder="123"></label>
+            <label class="campo"><span>Bairro</span><select id="conta-bairro"></select></label>
+          </div>
+          <label class="campo"><span>Complemento</span><input id="conta-complemento" type="text" placeholder="Apto, bloco, casa..."></label>
+          <label class="campo"><span>Ponto de referência</span><input id="conta-referencia" type="text" placeholder="Perto de onde? Portão de que cor?"></label>
+          <div class="form-actions">
+            <button type="submit" class="btn-primario">Salvar dados</button>
+            <button type="button" class="btn-secundario" id="btn-conta-cancelar-edicao">Cancelar</button>
+          </div>
+        </form>
+        <p class="conta-nota">Estes são os mesmos dados da entrega — o que você mudar aqui já vem preenchido no próximo pedido.</p>
+      </div>
+      <div class="conta-secao">
+        <h3>Últimas compras</h3>
+        <div id="conta-pedidos"></div>
+      </div>
+      <div class="conta-secao">
+        <h3>Minhas promoções</h3>
+        <div id="conta-promos"></div>
+      </div>
+      <div class="conta-secao">
+        <h3>Sorteios</h3>
+        <div id="conta-sorteios"></div>
+      </div>
+      <p class="conta-nota">Sua conta abre pelo seu WhatsApp, sem senha. Os sorteados aparecem só pelo primeiro nome.</p>
+    </div>
   </div>
 </div>
 

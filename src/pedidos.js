@@ -14,6 +14,7 @@ const fidelidade = require('./fidelidade');
 const cupons = require('./cupons');
 const recuperador = require('./recuperador');
 const pushPainel = require('./push');
+const pagamentos = require('./pagamentos'); // 1.16.41: valida o método contra os ativos no painel
 
 const TRANSICOES = {
   NOVO: ['EM_PREPARO', 'CANCELADO'],
@@ -204,7 +205,13 @@ async function criarPedido(corpo) {
   const total = subtotal - desconto + taxa;
 
   const forma = String(corpo.forma_pagamento || 'dinheiro');
-  const metodo = String(corpo.metodo_pagamento || forma); // pix|cartao|dinheiro|pix_mp|cartao_mp|pix_asaas|cartao_asaas
+  // 1.16.42: códigos antigos (pix_asaas/pix_mp) viram o genérico (pix_online)
+  // — o cliente nunca vê o provedor, e páginas em cache continuam valendo.
+  const metodo = pagamentos.normalizarMetodo(String(corpo.metodo_pagamento || forma)); // pix|cartao|dinheiro|pix_online|cartao_online
+  // 1.16.41: o método tem que estar ATIVO no painel — um método desligado não
+  // pode ser forçado pela API. O checkout só mostra os ativos, mas a trava é aqui.
+  const metodosAtivos = (await pagamentos.metodosPublicos(loja)).map((m) => m.codigo);
+  if (!metodosAtivos.includes(metodo)) throw new Error('Forma de pagamento indisponível no momento. Escolha outra forma de pagamento.');
   let troco = null;
   if (forma === 'dinheiro' && corpo.troco_para_centavos) {
     troco = Number(corpo.troco_para_centavos);

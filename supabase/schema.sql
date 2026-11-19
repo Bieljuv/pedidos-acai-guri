@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS pagamentos (
   valor_centavos INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'nao_aplicavel',
   externo_id TEXT, qr_texto TEXT, link_pagamento TEXT,
-  ultimo_evento TEXT,
+  ultimo_evento TEXT, expira_em TEXT,
   criado_em TIMESTAMPTZ DEFAULT now(), atualizado_em TIMESTAMPTZ DEFAULT now()
 );
 

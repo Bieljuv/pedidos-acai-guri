@@ -503,7 +503,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ================= PEDIDOS ================= */
-const FORMA_ROTULO = { pix:'Pix', dinheiro:'Dinheiro', cartao:'Cartão', pix_mp:'Pix MP', cartao_mp:'Cartão MP', pix_asaas:'Pix Asaas', cartao_asaas:'Cartão Asaas' };
+const FORMA_ROTULO = { pix:'Pix', dinheiro:'Dinheiro', cartao:'Cartão', pix_mp:'Pix online', cartao_mp:'Cartão online', pix_asaas:'Pix online', cartao_asaas:'Cartão online', pix_online:'Pix online', cartao_online:'Cartão online' };
 const STATUS_ROTULO = { NOVO:'Novo', EM_PREPARO:'Em preparo', PRONTO:'Pronto', SAIU_ENTREGA:'Saiu p/ entrega', ENTREGUE:'Entregue', CANCELADO:'Cancelado' };
 const COLUNAS = [
   { titulo:'Novos', status:['NOVO'] },
@@ -515,6 +515,17 @@ const COLUNAS = [
 function nomeItem(it) { return it.nome || it.nome_snapshot || it.produto_nome || 'Item'; }
 function nomeOpcao(op) { return op.nome || op.opcao_nome || op.nome_snapshot || ''; }
 function grupoOpcao(op) { return op.grupo_nome || op.grupo || ''; }
+// 1.16.44: formata a validade do pagamento (Asaas manda só a data,
+// "2026-11-20"; o MP manda data+hora ISO).
+function fmtValidadePag(v) {
+  try {
+    const s = String(v || '');
+    if (!s) return '';
+    const dt = s.length <= 10 ? new Date(s + 'T23:59:59') : new Date(s.replace(' ', 'T'));
+    if (isNaN(dt)) return s;
+    return dt.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return String(v || ''); }
+}
 function seloPagamento(p) {
   const st = p.pagamento_status;
   if (st === 'pendente') return '<span class="selo pag-pendente">aguardando pagamento</span>';
@@ -526,7 +537,7 @@ function seloPagamento(p) {
 }
 function selosPedido(p) {
   return `<span class="selo ${p.tipo === 'entrega' ? 'entrega' : 'retirada'}">${p.tipo === 'entrega' ? 'ENTREGA' : 'RETIRADA'}</span>`
-    + `<span class="selo">${esc(FORMA_ROTULO[p.forma_pagamento] || p.forma_pagamento || '')}</span>`
+    + `<span class="selo">${esc(FORMA_ROTULO[p.metodo_pagamento] || FORMA_ROTULO[p.forma_pagamento] || p.forma_pagamento || '')}</span>`
     + seloPagamento(p);
 }
 function minutosDesde(iso) {
@@ -568,7 +579,7 @@ function deltaTxt(cur, prev) { // comparativo com o período anterior
   if (pct < 0) return { txt: `▼ ${pct}% vs anterior`, cls: 'down' };
   return { txt: '＝ 0% vs anterior', cls: '' };
 }
-const GRAF_PAG_COR = { pix: '#1d9e57', cartao: '#2563eb', dinheiro: '#e6a700' };
+const GRAF_PAG_COR = { pix: '#1d9e57', cartao: '#2563eb', dinheiro: '#e6a700', pix_online: '#0e7490', cartao_online: '#7c3aed' };
 function grafDonut(pag) { // [{forma, qtd, total_centavos}] -> rosca + legenda (% do valor)
   const CIRC = 339.3;
   const total = pag.reduce((s, p) => s + (Number(p.total_centavos) || 0), 0);
@@ -825,9 +836,16 @@ async function abrirDetalhe(id, silencioso = false) {
           <div class="linha"><span>Subtotal</span><span>${fmtBRL(p.subtotal_centavos)}</span></div>
           <div class="linha"><span>Taxa de entrega</span><span>${fmtBRL(p.taxa_entrega_centavos)}</span></div>
           ${p.desconto_centavos ? `<div class="linha"><span>Desconto</span><span>− ${fmtBRL(p.desconto_centavos)}</span></div>` : ''}
-          <div class="linha total"><span>Total (${esc(FORMA_ROTULO[p.forma_pagamento] || p.forma_pagamento || '')})</span><span>${fmtBRL(p.total_centavos)}</span></div>
+          <div class="linha total"><span>Total (${esc(FORMA_ROTULO[p.metodo_pagamento] || FORMA_ROTULO[p.forma_pagamento] || p.forma_pagamento || '')})</span><span>${fmtBRL(p.total_centavos)}</span></div>
         </div>
         ${p.pagamento_status && p.pagamento_status !== 'nao_aplicavel' ? `<p style="margin-top:.4rem">${seloPagamento(p)}</p>` : ''}
+        ${p.pagamento && p.pagamento.status === 'pendente' && p.pagamento.link_pagamento ? `<div class="det-pag-link">
+          <p style="margin:.4rem 0 .2rem"><strong>Link de pagamento do cliente:</strong></p>
+          <p style="word-break:break-all;margin:0 0 .4rem"><a href="${esc(p.pagamento.link_pagamento)}" target="_blank" rel="noopener">${esc(p.pagamento.link_pagamento)}</a></p>
+          <button class="btn btn-ghost btn-sm" id="btnCopiarLinkPag">Copiar link</button>
+          ${p.pagamento.expira_em ? `<p class="campo-dica" style="margin-top:.4rem">Válido até ${esc(fmtValidadePag(p.pagamento.expira_em))}.</p>` : ''}
+        </div>` : ''}
+        ${(p.pagamento_status === 'erro_config' || p.pagamento_status === 'falhou') && (String(p.metodo_pagamento || '').endsWith('_online') || String(p.metodo_pagamento || '').endsWith('_asaas') || String(p.metodo_pagamento || '').endsWith('_mp')) ? `<button class="btn btn-primary" id="btnGerarPagamento" style="margin-top:.6rem">Gerar pagamento novamente</button>` : ''}
         ${troco}
       </div>
       <div class="det-acoes">${acoes}
@@ -873,6 +891,25 @@ async function abrirDetalhe(id, silencioso = false) {
     $$('#drawerBody [data-ent-consultar]').forEach(b => b.addEventListener('click', () => acaoEntrega99('consultar', b.dataset.entConsultar, p)));
     $$('#drawerBody [data-ent-cancelar]').forEach(b => b.addEventListener('click', () => acaoEntrega99('cancelar', b.dataset.entCancelar, p)));
     $('#btnImprimir').addEventListener('click', () => imprimirComanda(p.id));
+    const bCopiarPag = $('#btnCopiarLinkPag');
+    if (bCopiarPag) bCopiarPag.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(p.pagamento.link_pagamento); toast('Link de pagamento copiado!'); }
+      catch { toast('Selecione o link e copie manualmente.', true); }
+    });
+    const bGerarPag = $('#btnGerarPagamento');
+    if (bGerarPag) bGerarPag.addEventListener('click', async () => {
+      bGerarPag.disabled = true;
+      bGerarPag.textContent = 'Gerando pagamento…';
+      try {
+        await api('/api/painel/pedidos/' + p.id + '/gerar-pagamento', { method: 'POST' });
+        toast('Pagamento gerado de novo. O link novo já está no detalhe.');
+        abrirDetalhe(p.id, true);
+      } catch (err) {
+        toast(err.message, true);
+        bGerarPag.disabled = false;
+        bGerarPag.textContent = 'Gerar pagamento novamente';
+      }
+    });
   } catch (err) { if (!silencioso) toast(err.message, true); }
 }
 function fecharDrawer() {
@@ -1484,6 +1521,8 @@ async function carregarRecebimentos() {
     // Mercado Pago
     const mp = R['mercadopago'] || {};
     $('#mpAtivo').checked = !!mp.ativo;
+    $('#mpPixOnline').checked = extraDe(mp, 'pix_online') !== false;
+    $('#mpCartaoOnline').checked = extraDe(mp, 'cartao_online') !== false;
     $('#mpAmbiente').value = mp.ambiente || 'sandbox';
     prepararCampoSegredo($('#mpAccessToken'), credDe(mp, 'access_token'));
     prepararCampoSegredo($('#mpPublicKey'), credDe(mp, 'public_key'));
@@ -1491,9 +1530,20 @@ async function carregarRecebimentos() {
     // Asaas
     const as = R['asaas'] || {};
     $('#asaasAtivo').checked = !!as.ativo;
+    $('#asaasPixOnline').checked = extraDe(as, 'pix_online') !== false;
+    $('#asaasCartaoOnline').checked = extraDe(as, 'cartao_online') !== false;
     $('#asaasAmbiente').value = as.ambiente || 'sandbox';
     prepararCampoSegredo($('#asaasApiKey'), credDe(as, 'api_key'));
     prepararCampoSegredo($('#asaasWebhookToken'), credDe(as, 'webhook_token'));
+    // 1.16.44: avisa na hora se o provedor ativo está com problema — antes
+    // o erro só aparecia quando o cliente tentava pagar. E lembra do
+    // e-mail da loja, que o Pix do Mercado Pago precisa. (O campo de
+    // credencial nasce vazio por segurança — a existência da chave está
+    // em dataset.mascara, não no value.)
+    if (mp.ativo && $('#mpAccessToken').dataset.mascara) testarProvedor('mercadopago', $('#mpTesteResult'));
+    if (as.ativo && $('#asaasApiKey').dataset.mascara) testarProvedor('asaas', $('#asaasTesteResult'));
+    const avisoEmail = $('#mpEmailAviso');
+    if (avisoEmail) avisoEmail.hidden = !(state.loja && !state.loja.email_pedidos);
   } catch (err) { toast('Recebimentos: ' + err.message, true); }
 }
 async function salvarRecebimento(meio, payload) {
@@ -1522,7 +1572,7 @@ $('#formMP').addEventListener('submit', async (e) => {
   if ($('#mpAccessToken').value.trim()) cred.access_token = $('#mpAccessToken').value.trim();
   if ($('#mpPublicKey').value.trim()) cred.public_key = $('#mpPublicKey').value.trim();
   if ($('#mpWebhookSecret').value.trim()) cred.webhook_secret = $('#mpWebhookSecret').value.trim();
-  try { await salvarRecebimento('mercadopago', { ativo: $('#mpAtivo').checked, ambiente: $('#mpAmbiente').value, credenciais: cred }); }
+  try { await salvarRecebimento('mercadopago', { ativo: $('#mpAtivo').checked, ambiente: $('#mpAmbiente').value, credenciais: cred, extra: { pix_online: $('#mpPixOnline').checked, cartao_online: $('#mpCartaoOnline').checked } }); }
   catch (err) { toast(err.message, true); }
 });
 $('#formAsaas').addEventListener('submit', async (e) => {
@@ -1530,7 +1580,7 @@ $('#formAsaas').addEventListener('submit', async (e) => {
   const cred = {};
   if ($('#asaasApiKey').value.trim()) cred.api_key = $('#asaasApiKey').value.trim();
   if ($('#asaasWebhookToken').value.trim()) cred.webhook_token = $('#asaasWebhookToken').value.trim();
-  try { await salvarRecebimento('asaas', { ativo: $('#asaasAtivo').checked, ambiente: $('#asaasAmbiente').value, credenciais: cred }); }
+  try { await salvarRecebimento('asaas', { ativo: $('#asaasAtivo').checked, ambiente: $('#asaasAmbiente').value, credenciais: cred, extra: { pix_online: $('#asaasPixOnline').checked, cartao_online: $('#asaasCartaoOnline').checked } }); }
   catch (err) { toast(err.message, true); }
 });
 $$('[data-copy]').forEach(b => b.addEventListener('click', async () => {
@@ -1543,7 +1593,7 @@ async function testarProvedor(meio, resultEl) {
   try {
     const data = await api(`/api/painel/recebimentos/${meio}/testar`, { method: 'POST', body: {} });
     const ok = data.ok !== false && data.sucesso !== false;
-    resultEl.textContent = ok ? (data.mensagem || 'Conexão OK') : (data.mensagem || data.erro || 'Falhou');
+    resultEl.textContent = ok ? (data.detalhe || data.mensagem || 'Conexão OK') : (data.erro || data.mensagem || 'Falhou');
     resultEl.classList.add(ok ? 'ok' : 'erro');
   } catch (err) {
     resultEl.textContent = err.message;
@@ -1570,6 +1620,7 @@ function preencherLoja() {
   setMoney($('#lojaPedidoMinimo'), l.pedido_minimo_centavos || 0);
   setMoney($('#lojaTaxaUnica'), l.taxa_unica_centavos);
   $('#lojaChavePix').value = l.chave_pix || '';
+  $('#lojaEmailPedidos').value = l.email_pedidos || '';
   $('#lojaAbre').value = l.horario_abre || '';
   $('#lojaFecha').value = l.horario_fecha || '';
   $('#lojaAbertaManual').checked = !!l.aberta_manual;
@@ -1615,6 +1666,7 @@ $('#formLoja').addEventListener('submit', async (e) => {
     pedido_minimo_centavos: getMoney($('#lojaPedidoMinimo')) || 0,
     taxa_unica_centavos: getMoney($('#lojaTaxaUnica')),
     chave_pix: $('#lojaChavePix').value.trim(),
+    email_pedidos: $('#lojaEmailPedidos').value.trim() || null,
     horario_abre: $('#lojaAbre').value || null,
     horario_fecha: $('#lojaFecha').value || null,
     aberta_manual: $('#lojaAbertaManual').checked,

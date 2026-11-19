@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS pagamentos (
   valor_centavos INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'nao_aplicavel',
   externo_id TEXT, qr_texto TEXT, link_pagamento TEXT,
-  ultimo_evento TEXT,
+  ultimo_evento TEXT, expira_em TEXT,
   criado_em TEXT DEFAULT (datetime('now')), atualizado_em TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS trabalho_sessoes (
@@ -472,8 +472,10 @@ function seedSqlite() {
     rec.run('pix_presencial', 1, 'producao', JSON.stringify({ chave_pix: '' }));
     rec.run('cartao_presencial', 1, 'producao', '{}');
     rec.run('dinheiro', 1, 'producao', JSON.stringify({ aceita_troco: true }));
-    rec.run('mercadopago', 0, 'sandbox', '{}');
-    rec.run('asaas', 0, 'sandbox', '{}');
+    // 1.16.41: Pix e Cartão online nascem LIGADOS por provedor (o ADM desliga
+    // cada um no painel; ausente = ligado, para bancos já existentes).
+    rec.run('mercadopago', 0, 'sandbox', JSON.stringify({ pix_online: true, cartao_online: true }));
+    rec.run('asaas', 0, 'sandbox', JSON.stringify({ pix_online: true, cartao_online: true }));
 
     sq.exec('COMMIT');
     return true;
@@ -530,8 +532,10 @@ async function seedPg() {
     await q.run(rec, 'pix_presencial', 1, 'producao', JSON.stringify({ chave_pix: '' }));
     await q.run(rec, 'cartao_presencial', 1, 'producao', '{}');
     await q.run(rec, 'dinheiro', 1, 'producao', JSON.stringify({ aceita_troco: true }));
-    await q.run(rec, 'mercadopago', 0, 'sandbox', '{}');
-    await q.run(rec, 'asaas', 0, 'sandbox', '{}');
+    // 1.16.41: Pix e Cartão online nascem LIGADOS por provedor (o ADM desliga
+    // cada um no painel; ausente = ligado, para bancos já existentes).
+    await q.run(rec, 'mercadopago', 0, 'sandbox', JSON.stringify({ pix_online: true, cartao_online: true }));
+    await q.run(rec, 'asaas', 0, 'sandbox', JSON.stringify({ pix_online: true, cartao_online: true }));
   });
 }
 
@@ -586,6 +590,8 @@ async function init() {
   // 1.16.39: trava total de escolhas do grupo (linha Trufados: até 3 sabores
   // mesmo com excedente pago — o `maximo` sozinho não trava nesse caso).
   await pool.query('ALTER TABLE grupos_opcoes ADD COLUMN IF NOT EXISTS limite INTEGER');
+  // 1.16.44: validade do QR/link do pagamento online (o cliente vê até quando vale).
+  await pool.query('ALTER TABLE pagamentos ADD COLUMN IF NOT EXISTS expira_em TEXT');
   console.log('[banco] Modo SUPABASE: conectado no Postgres da DATABASE_URL.');
   if (await seed()) console.log('[banco] Postgres vazio — seed inicial aplicado (loja de exemplo + admin/admin123).');
 }

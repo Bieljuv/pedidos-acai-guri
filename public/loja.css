@@ -355,6 +355,16 @@ body.rolou .hnome{opacity:1;transform:none}
   margin-top:10px; background:#F6E9F8; border-radius:12px; padding:11px 13px;
   font-size:13.5px; color:var(--ink);
 }
+.pag-sem-metodo{
+  background:#F6E9F8; border-radius:12px; padding:13px 14px;
+  font-size:14px; color:var(--ink); margin:0;
+}
+/* 1.16.43: animação de processamento (checkout) e de aguardando (acompanhamento) */
+.spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;vertical-align:-2px;margin-right:7px;animation:girar .8s linear infinite}
+@keyframes girar{to{transform:rotate(360deg)}}
+.pag-pulso{display:inline-block;width:10px;height:10px;border-radius:50%;background:#7E047D;margin-right:6px;vertical-align:1px;animation:pulso 1.2s ease-in-out infinite}
+.pag-validade{font-size:.85rem;opacity:.75;margin:.4rem 0 0}
+@keyframes pulso{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.5);opacity:.55}}
 .cupom-row{display:flex;gap:8px;margin:0 0 .4rem}
 /* Mesma formatacao dos demais campos do checkout (.campo input): antes
    o cupom era o unico input quadrado, com borda fina padrao do navegador

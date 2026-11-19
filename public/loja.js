@@ -948,12 +948,17 @@ const METODOS_PADRAO = [
 ];
 const ROTULOS_PAG = {
   pix: 'Pix (na entrega/retirada)', cartao: 'Cartão (na entrega/retirada)', dinheiro: 'Dinheiro',
-  pix_mp: 'Pix online — Mercado Pago', cartao_mp: 'Cartão online — Mercado Pago',
-  pix_asaas: 'Pix online — Asaas', cartao_asaas: 'Cartão online — Asaas',
+  pix_mp: 'Pix online', cartao_mp: 'Cartão online',
+  pix_asaas: 'Pix online', cartao_asaas: 'Cartão online',
+  pix_online: 'Pix online', cartao_online: 'Cartão online',
 };
-const ONLINE_SET = new Set(['pix_mp', 'cartao_mp', 'pix_asaas', 'cartao_asaas']);
+const ONLINE_SET = new Set(['pix_mp', 'cartao_mp', 'pix_asaas', 'cartao_asaas', 'pix_online', 'cartao_online']);
 let tipoRecebimento = 'entrega';
 let pagamentoSel = null;
+/* 1.16.43: envio em andamento — atualizarResumoCheckout() não pode
+   reescrever o rótulo do botão no meio do envio (a consulta de fidelidade
+   resolve no meio do voo e apagava o "Processando pagamento…"). */
+let enviandoPedido = false;
 let ultimoPagamento = null; // pagamento devolvido pelo POST (online)
 
 function mascararFone(v) {
@@ -1116,9 +1121,11 @@ function atualizarResumoCheckout() {
   const rotTotal = $('#rs-total-rot');
   if (rotTotal) rotTotal.textContent = taxa === null ? 'Total parcial' : 'TOTAL';
   const btn = $('#btn-confirmar');
-  btn.textContent = taxa === null
-    ? `Confirmar pedido • ${R$(sub - desconto)} + taxa`
-    : `Confirmar pedido • ${R$(sub - desconto + (taxa || 0))}`;
+  if (!enviandoPedido) {
+    btn.textContent = taxa === null
+      ? `Confirmar pedido • ${R$(sub - desconto)} + taxa`
+      : `Confirmar pedido • ${R$(sub - desconto + (taxa || 0))}`;
+  }
   const avisoMin = $('#rs-minimo');
   let bloqueia = false;
   if (loja && loja.pedido_minimo_centavos > 0 && sub < loja.pedido_minimo_centavos) {
@@ -1150,10 +1157,19 @@ function renderBairrosCheckout() {
   }
 }
 function renderPagamentosCheckout() {
-  const lista = (loja && Array.isArray(loja.metodos_pagamento) && loja.metodos_pagamento.length)
+  // 1.16.41: lista vazia é decisão do ADM (tudo desligado) — respeita e avisa.
+  // Só usa o padrão quando a lista ainda nem chegou do servidor.
+  const lista = (loja && Array.isArray(loja.metodos_pagamento))
     ? loja.metodos_pagamento : METODOS_PADRAO;
   const cont = $('#ck-pagamentos');
   cont.innerHTML = '';
+  if (!lista.length) {
+    cont.innerHTML = '<p class="pag-sem-metodo">Nenhuma forma de pagamento disponível no momento — fale com a loja pelo WhatsApp.</p>';
+    pagamentoSel = null;
+    $('#ck-troco-wrap').hidden = true;
+    $('#ck-pag-online-aviso').hidden = true;
+    return;
+  }
   for (const m of lista) {
     const online = m.online != null ? !!m.online : ONLINE_SET.has(m.codigo);
     const b = document.createElement('button');
@@ -1175,6 +1191,13 @@ function renderPagamentosCheckout() {
     const primeiroOnline = (lista[0].online != null ? !!lista[0].online : ONLINE_SET.has(lista[0].codigo));
     $('#ck-troco-wrap').hidden = pagamentoSel !== 'dinheiro';
     $('#ck-pag-online-aviso').hidden = !primeiroOnline;
+  }
+  /* 1.16.43: o aviso explica o passo a passo do método escolhido. */
+  const aviso = $('#ck-pag-online-aviso');
+  if (aviso) {
+    aviso.textContent = pagamentoSel === 'cartao_online'
+      ? 'Pagamento online: após confirmar, você será levado para a página segura de pagamento para informar os dados do cartão. Nenhum dado do cartão fica salvo na loja. Seu pedido já fica reservado.'
+      : 'Pagamento online: após confirmar, você recebe o QR Pix e o link para pagar. Seu pedido já fica reservado.';
   }
 }
 function definirTipo(tipo) {
@@ -1234,7 +1257,10 @@ $('#form-checkout').addEventListener('submit', async (ev) => {
   const whats = soDigitos($('#ck-whats').value);
   if (nome.length < 2) return erroCheckout('Conte pra gente seu nome');
   if (whats.length < 10 || whats.length > 13) return erroCheckout('Confira seu WhatsApp (DDD + número).');
-  if (!pagamentoSel) return erroCheckout('Escolha a forma de pagamento.');
+  if (!pagamentoSel) {
+    const semMetodo = loja && Array.isArray(loja.metodos_pagamento) && loja.metodos_pagamento.length === 0;
+    return erroCheckout(semMetodo ? 'Nenhuma forma de pagamento disponível no momento.' : 'Escolha a forma de pagamento.');
+  }
   let bairro_id = null, endereco = null;
   if (tipoRecebimento === 'entrega') {
     const rua = $('#ck-rua').value.trim();
@@ -1280,13 +1306,19 @@ $('#form-checkout').addEventListener('submit', async (ev) => {
   const corte = msgCorteCliente();
   if (corte) { erroCheckout(corte); return; }
   const btn = $('#btn-confirmar');
+  enviandoPedido = true;
   btn.disabled = true;
-  btn.textContent = 'Enviando…';
+  /* 1.16.43: pagamento online mostra a animação de processamento. */
+  btn.innerHTML = ONLINE_SET.has(pagamentoSel) ? '<span class="spin"></span> Processando pagamento…' : 'Enviando…';
   try {
+    // 1.16.44: limite de 30s — sem ele o botão ficava girando pra sempre
+    // se a rede travasse. Se estourar, o pedido PODE ter sido criado: a
+    // mensagem manda conferir em "Meu pedido" antes de tentar de novo.
     const r = await fetch('/api/public/pedidos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000),
     });
     const dados = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(dados.erro || 'Não foi possível enviar o pedido. Tente de novo.');
@@ -1304,8 +1336,12 @@ $('#form-checkout').addEventListener('submit', async (ev) => {
     toast(`Pedido #${dados.numero} enviado!`);
     irParaAcompanhamento(dados.token);
   } catch (e) {
-    erroCheckout(e.message || 'Algo deu errado. Seu pedido continua no carrinho — tente de novo.');
+    const msg = (e && e.name === 'TimeoutError')
+      ? 'A confirmação demorou demais. Antes de tentar de novo, confira em "Meu pedido" se o pedido já foi criado.'
+      : (e.message || 'Algo deu errado. Seu pedido continua no carrinho — tente de novo.');
+    erroCheckout(msg);
   } finally {
+    enviandoPedido = false;
     btn.disabled = false;
     atualizarResumoCheckout();
   }
@@ -1324,6 +1360,7 @@ const STATUS_TXT = {
 };
 let tokenAcomp = null;
 let timerAcomp = null;
+let intervaloAcomp = 5000; // 1.16.44: 5s até o pagamento confirmar, 30s depois
 
 /* Sons do acompanhamento (v1.16.7; arquivos reais na v1.16.10 — o
    Gabriel mandou os dois MP3): quando o pedido SAI pra entrega, toca
@@ -1442,18 +1479,46 @@ function renderAcompanhamento(d) {
   const online = ONLINE_SET.has(d.forma_pagamento) || !!pag;
   let pagHTML = '';
   if (online && pagStatus === 'pago') {
-    pagHTML = `<div class="pago-box">${icLoja('checkCirculo')} Pagamento online confirmado</div>`;
+    pagHTML = `<div class="pago-box">${icLoja('checkCirculo')} Pagamento confirmado! Pedido #${esc(String(d.numero))} já está com a loja.</div>
+    <button type="button" class="btn-secundario" id="btn-recibo" style="width:100%;margin-top:10px">${icLoja('receipt')} Salvar recibo</button>`;
   } else if (online && pagStatus === 'pendente') {
-    pagHTML = `<div class="pagamento-box">
-      <h3>Aguardando pagamento</h3>
-      <p>Seu pedido já está reservado. Pague para confirmarmos tudo por aqui:</p>
+    /* 1.16.43: Pix mostra QR + link; cartão mostra a página segura (sem QR). */
+    /* 1.16.44: mostra até quando o QR/link vale (Asaas: 24h). */
+    const validade = (pag && pag.expira_em) ? (() => {
+      try {
+        const s = String(pag.expira_em);
+        const dt = s.length <= 10 ? new Date(s + 'T23:59:59') : new Date(s.replace(' ', 'T'));
+        if (isNaN(dt)) return '';
+        return '<p class="pag-validade">QR e link válidos até ' + esc(dt.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })) + '.</p>';
+      } catch { return ''; }
+    })() : '';
+    const ehCartao = String(d.metodo_pagamento || '').startsWith('cartao');
+    pagHTML = ehCartao ? `<div class="pagamento-box">
+      <h3><span class="pag-pulso"></span> Pagamento com cartão</h3>
+      <p>Seu pedido já está reservado. Toque no botão abaixo para informar os dados do cartão na <strong>página segura de pagamento</strong>. O pagamento é validado na hora e a confirmação aparece aqui sozinha.</p>
+      ${validade}
+      ${pag && pag.link_pagamento ? `<a class="btn-primario" style="display:inline-flex;align-items:center;text-decoration:none;margin-top:12px" href="${esc(pag.link_pagamento)}" target="_blank" rel="noopener">${icLoja('cartao')} Pagar com cartão</a>` : '<p>Gerando a página de pagamento… atualizando automaticamente.</p>'}
+    </div>` : `<div class="pagamento-box">
+      <h3><span class="pag-pulso"></span> Aguardando pagamento</h3>
+      <p>Seu pedido já está reservado. Pague para confirmarmos tudo por aqui — assim que o pagamento for confirmado, esta tela atualiza sozinha:</p>
+      ${validade}
       ${pag && pag.qr_texto ? `<div class="qr-texto" id="qr-texto">${esc(pag.qr_texto)}</div>
         <button type="button" class="btn-secundario" id="btn-copiar-qr">${icLoja('copiar')} Copiar código Pix</button>` : ''}
       ${pag && pag.link_pagamento ? `<br><a class="btn-primario" style="display:inline-flex;align-items:center;text-decoration:none;margin-top:12px" href="${esc(pag.link_pagamento)}" target="_blank" rel="noopener">${icLoja('cartao')} Pagar agora</a>` : ''}
       ${!pag || (!pag.qr_texto && !pag.link_pagamento) ? '<p>Gerando os dados de pagamento… atualizando automaticamente.</p>' : ''}
     </div>`;
   } else if (online && (pagStatus === 'falhou' || pagStatus === 'erro_config')) {
-    pagHTML = `<div class="cancelado-box">Houve um problema com o pagamento online. Não se preocupe: a loja vai te chamar no WhatsApp para combinar outra forma.</div>`;
+    /* 1.16.44: o cliente tenta de novo sozinho — antes só restava esperar a loja ligar. */
+    pagHTML = `<div class="cancelado-box">Houve um problema com o pagamento online. Toque abaixo para gerar o pagamento de novo — se preferir, a loja também resolve pelo WhatsApp.</div>
+    <button type="button" class="btn-primario" id="btn-tentar-pagamento" style="width:100%;margin-top:10px">${icLoja('cartao')} Tentar pagar online novamente</button>`;
+  } else if (d.forma_pagamento === 'pix' && loja && loja.chave_pix) {
+    /* 1.16.41: Pix presencial — mostra a chave da loja pra o cliente pagar na entrega. */
+    pagHTML = `<div class="pagamento-box">
+      <h3>Pague por Pix na entrega</h3>
+      <p>Use a chave Pix da loja:</p>
+      <div class="qr-texto" id="chave-pix-texto">${esc(loja.chave_pix)}</div>
+      <button type="button" class="btn-secundario" id="btn-copiar-chave">${icLoja('copiar')} Copiar chave Pix</button>
+    </div>`;
   }
 
   const itensHTML = (d.itens || []).map((it) => {
@@ -1468,7 +1533,7 @@ function renderAcompanhamento(d) {
     </div>`;
   }).join('');
 
-  const rotuloPag = ROTULOS_PAG[d.forma_pagamento] || d.forma_pagamento || '';
+  const rotuloPag = ROTULOS_PAG[d.metodo_pagamento] || ROTULOS_PAG[d.forma_pagamento] || d.forma_pagamento || '';
   const zapLoja = loja && loja.whatsapp ? soDigitos(loja.whatsapp) : '';
   /* Código de entrega (v1.9): destaque pro cliente guardar e informar ao
      entregador — sem ele, a loja não consegue dar baixa no pedido. */
@@ -1538,6 +1603,32 @@ function renderAcompanhamento(d) {
     try { await navigator.clipboard.writeText($('#qr-texto').textContent.trim()); toast('Código Pix copiado!'); }
     catch { toast('Selecione o código e copie manualmente.'); }
   });
+  const btnChave = $('#btn-copiar-chave');
+  if (btnChave) btnChave.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('#chave-pix-texto').textContent.trim()); toast('Chave Pix copiada!'); }
+    catch { toast('Selecione a chave e copie manualmente.'); }
+  });
+  const btnRecibo = $('#btn-recibo');
+  if (btnRecibo) btnRecibo.addEventListener('click', () => abrirRecibo(d));
+  /* 1.16.44: gerar o pagamento online de novo (quando falhou ao gerar). */
+  const btnTentar = $('#btn-tentar-pagamento');
+  if (btnTentar) btnTentar.addEventListener('click', async () => {
+    btnTentar.disabled = true;
+    btnTentar.innerHTML = '<span class="spin"></span> Gerando pagamento…';
+    try {
+      const r = await fetch('/api/public/pedidos/' + encodeURIComponent(tokenAcomp) + '/tentar-pagamento', {
+        method: 'POST', signal: AbortSignal.timeout(30000),
+      });
+      const dados = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(dados.erro || 'Não foi possível gerar o pagamento.');
+      if (dados.status === 'pendente') { ultimoPagamento = { status: 'pendente', qr_texto: dados.qr_texto || null, link_pagamento: dados.link_pagamento || null, expira_em: dados.expira_em || null }; carregarAcompanhamento(); }
+      else toast('Ainda não foi possível gerar o pagamento. Tente de novo ou chame a loja no WhatsApp.');
+    } catch (e) {
+      toast(e.message || 'Não foi possível gerar o pagamento. Tente de novo.');
+      btnTentar.disabled = false;
+      btnTentar.innerHTML = 'Tentar pagar online novamente';
+    }
+  });
   const btnNovo = $('#btn-novo-pedido');
   if (btnNovo) btnNovo.addEventListener('click', voltarParaLoja);
   const btnSom = $('#btn-som-acomp');
@@ -1549,6 +1640,37 @@ function renderAcompanhamento(d) {
     btnSom.title = desligado ? 'Sons desligados' : 'Sons ligados';
     toast(desligado ? 'Sons do acompanhamento desligados.' : 'Sons do acompanhamento ligados.');
   });
+}
+/* 1.16.42: recibo do pagamento online — abre numa janela só com o recibo,
+   com botão de imprimir/salvar em PDF (o diálogo de impressão permite
+   "Salvar como PDF"). Sem nome de provedor: só "Pix online". */
+function abrirRecibo(d) {
+  const data = (() => { try { return new Date(String(d.created_at || '').replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } })();
+  const rotulo = ROTULOS_PAG[d.metodo_pagamento] || ROTULOS_PAG[d.forma_pagamento] || 'Pix online';
+  const linhasItens = (d.itens || []).map((it) => {
+    const nome = it.nome_snapshot || it.nome || 'Item';
+    const sub = it.subtotal_centavos != null ? it.subtotal_centavos : (it.preco_unitario_centavos || 0) * (it.quantidade || 1);
+    return `<div class="rec-linha"><span>${it.quantidade || 1}× ${esc(nome)}</span><span>${R$(sub)}</span></div>`;
+  }).join('');
+  const win = window.open('', '_blank');
+  if (!win) { toast('Permita pop-ups para abrir o recibo.'); return; }
+  win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>Recibo — Pedido #${esc(String(d.numero))}</title>
+<style>body{font-family:system-ui,Arial,sans-serif;color:#111;max-width:480px;margin:0 auto;padding:24px}h1{font-size:20px;margin:0 0 4px}.rec-loja{color:#555;margin:0 0 16px}.rec-linha{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dashed #ccc;font-size:15px}.rec-total{display:flex;justify-content:space-between;font-weight:800;font-size:17px;padding:10px 0}.rec-meta{font-size:14px;color:#333;line-height:1.7;margin:12px 0}.rec-pago{color:#177245;font-weight:800}.rec-btn{display:block;width:100%;margin-top:18px;padding:12px;background:#7E047D;color:#fff;border:0;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer}@media print{.rec-btn{display:none}body{padding:0}}</style>
+</head><body>
+<h1>Recibo de pagamento</h1>
+<p class="rec-loja">${esc((loja && loja.nome) || 'Açaí do Guri')}</p>
+<div class="rec-meta">Pedido <strong>#${esc(String(d.numero))}</strong><br>${data ? `Data: ${esc(data)}<br>` : ''}Cliente: ${esc(d.cliente_nome || '')}<br>Pagamento: ${esc(rotulo)}<br>Status: <span class="rec-pago">Pago</span>${d.pagamento && d.pagamento.externo_id ? `<br>Ref: ${esc(String(d.pagamento.externo_id))}` : ''}</div>
+${linhasItens}
+${d.subtotal_centavos != null ? `<div class="rec-linha"><span>Subtotal</span><span>${R$(d.subtotal_centavos)}</span></div>` : ''}
+${d.taxa_entrega_centavos ? `<div class="rec-linha"><span>Taxa de entrega</span><span>${R$(d.taxa_entrega_centavos)}</span></div>` : ''}
+${d.desconto_centavos ? `<div class="rec-linha"><span>Desconto</span><span>− ${R$(d.desconto_centavos)}</span></div>` : ''}
+<div class="rec-total"><span>Total pago</span><span>${R$(d.total_centavos || 0)}</span></div>
+<p class="rec-meta">Guarde este recibo.</p>
+<button class="rec-btn" onclick="window.print()">Imprimir / Salvar em PDF</button>
+</body></html>`);
+  win.document.close();
+  setTimeout(() => { try { win.focus(); win.print(); } catch { /* o botão imprime */ } }, 400);
 }
 let statusAnteriorAcomp = undefined; // undefined = primeira carga desta tela
 async function carregarAcompanhamento() {
@@ -1566,6 +1688,13 @@ async function carregarAcompanhamento() {
     }
     statusAnteriorAcomp = d.status;
     renderAcompanhamento(d);
+    // 1.16.44: com o pagamento confirmado, a tela só precisa acompanhar o
+    // preparo — a consulta passa de 5s pra 30s (menos bateria e dados).
+    if (d.pagamento_status === 'pago' && intervaloAcomp !== 30000) {
+      intervaloAcomp = 30000;
+      pararPolling();
+      timerAcomp = setInterval(carregarAcompanhamento, intervaloAcomp);
+    }
     if (d.status === 'ENTREGUE' || d.status === 'CANCELADO') pararPolling();
   } catch {
     $('#acompanhamento').innerHTML = '<div class="acomp-card"><p class="acomp-status-txt">Não encontramos este pedido. Confira o link ou chame a loja no WhatsApp.</p></div>';
@@ -1577,9 +1706,10 @@ function iniciarAcompanhamento(token) {
   tokenAcomp = token;
   statusAnteriorAcomp = undefined;
   somPendente = null;
+  intervaloAcomp = 5000;
   pararPolling();
   carregarAcompanhamento();
-  timerAcomp = setInterval(carregarAcompanhamento, 5000);
+  timerAcomp = setInterval(carregarAcompanhamento, intervaloAcomp);
 }
 
 /* ============================================================

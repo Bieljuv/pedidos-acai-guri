@@ -234,8 +234,8 @@ app.post('/api/public/pedidos', h(async (req, res) => {
     const { pedido } = await pedidosCore.criarPedido(corpo);
     let pagamentoResp = null;
     try {
-      const pag = await pagamentos.iniciarPagamento(pedido, metodo);
-      pagamentoResp = { status: pag.status, qr_texto: pag.qr_texto || null, link_pagamento: pag.link_pagamento || null };
+      const pag = await pagamentos.iniciarPagamento(pedido, metodo, { baseUrl: pagamentos.baseUrlPublica(req) });
+      pagamentoResp = { status: pag.status, qr_texto: pag.qr_texto || null, link_pagamento: pag.link_pagamento || null, expira_em: pag.expira_em || null };
       const pagRow = await get('SELECT status FROM pagamentos WHERE pedido_id=? ORDER BY id DESC LIMIT 1', pedido.id);
       if (pagRow && pagRow.status === 'pendente') {
         await notif.notificarDonoTexto(`Pedido #${pedido.numero} aguardando pagamento online (${metodo}).`, pedido.id);
@@ -257,6 +257,24 @@ app.get('/api/public/pedidos/:token', h(async (req, res) => {
   // Sorteio divulgado (v1.16.9): o acompanhamento avisa que ele esta participando.
   try { const sa = await fidelidade.sorteioAtivo(); if (sa) detalhe.sorteio = { titulo: sa.titulo, premio: sa.premio_texto }; } catch { /* opcional */ }
   res.json(detalhe);
+}));
+// 1.16.44: tentar o pagamento online de novo — o cliente (botão na tela de
+// acompanhamento) ou a loja (botão no detalhe do pedido). Só vale quando o
+// pagamento está com erro ou falhou; se já existe um pendente, devolve ele
+// em vez de criar outra cobrança. O token do pedido é a chave (mesma regra
+// da tela de acompanhamento).
+app.post('/api/public/pedidos/:token/tentar-pagamento', h(async (req, res) => {
+  const pedido = await get('SELECT * FROM pedidos WHERE token=?', req.params.token);
+  if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
+  if (!['erro_config', 'falhou'].includes(pedido.pagamento_status)) {
+    return res.status(409).json({ erro: 'Este pedido não precisa gerar o pagamento de novo.' });
+  }
+  try {
+    const pag = await pagamentos.tentarPagamentoNovamente(pedido, { baseUrl: pagamentos.baseUrlPublica(req) });
+    return res.json({ status: pag.status, qr_texto: pag.qr_texto || null, link_pagamento: pag.link_pagamento || null, expira_em: pag.expira_em || null });
+  } catch (e) {
+    return res.status(422).json({ erro: String(e.message || e) });
+  }
 }));
 
 // Fidelidade pública (checkout): o cliente digita o próprio número e o
@@ -450,6 +468,17 @@ app.get('/api/painel/pedidos/:id', auth, h(async (req, res) => {
   const p = await pedidosCore.getPedido(Number(req.params.id));
   if (!p) return res.status(404).json({ erro: 'Pedido não encontrado.' });
   res.json(await pedidosCore.detalhePedido(p));
+}));
+// 1.16.44: a loja gera o pagamento online de novo (quando falhou ao gerar
+// ou o cliente perdeu o link). Só o ADM — é ação de dinheiro.
+app.post('/api/painel/pedidos/:id/gerar-pagamento', auth, soAdmin, h(async (req, res) => {
+  const p = await pedidosCore.getPedido(Number(req.params.id));
+  if (!p) return res.status(404).json({ erro: 'Pedido não encontrado.' });
+  if (!['erro_config', 'falhou'].includes(p.pagamento_status)) {
+    return res.status(409).json({ erro: 'Este pedido não precisa gerar o pagamento de novo.' });
+  }
+  const pag = await pagamentos.tentarPagamentoNovamente(p, { baseUrl: pagamentos.baseUrlPublica(req) });
+  res.json({ status: pag.status, qr_texto: pag.qr_texto || null, link_pagamento: pag.link_pagamento || null, expira_em: pag.expira_em || null });
 }));
 app.post('/api/painel/pedidos/:id/transicao', auth, h(async (req, res) => {
   if (req.usuario.perfil === 'funcionario' && !(await equipe.sessaoTrabalhoAberta(req.usuario.id))) {

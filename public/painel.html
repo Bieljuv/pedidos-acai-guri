@@ -284,9 +284,18 @@
         <p class="dica">Pix e cartão online via API do Mercado Pago. As credenciais ficam salvas só no servidor e são mostradas mascaradas — deixe o campo como está para manter a credencial atual.</p>
         <form class="card-form" id="formMP">
           <div class="form-row between">
-            <div><strong>Ativar Mercado Pago</strong><div class="dica">Oferece Pix MP e Cartão MP no checkout.</div></div>
+            <div><strong>Ativar Mercado Pago</strong><div class="dica">Liga o recebimento online por este provedor.</div></div>
             <span class="switch"><input type="checkbox" id="mpAtivo"><span class="slider"></span></span>
           </div>
+          <div class="form-row between">
+            <div><strong>Pix online (Mercado Pago)</strong><div class="dica">Aparece no checkout do cliente.</div></div>
+            <span class="switch"><input type="checkbox" id="mpPixOnline"><span class="slider"></span></span>
+          </div>
+          <div class="form-row between">
+            <div><strong>Cartão online (Mercado Pago)</strong><div class="dica">Aparece no checkout do cliente.</div></div>
+            <span class="switch"><input type="checkbox" id="mpCartaoOnline"><span class="slider"></span></span>
+          </div>
+          <p class="campo-dica">O cliente vê só “Pix online” / “Cartão online” — o nome Mercado Pago não aparece pra ele. Se o Asaas também estiver ligado, ele atende primeiro.</p>
           <label>Ambiente
             <select id="mpAmbiente">
               <option value="sandbox">Sandbox (testes)</option>
@@ -313,6 +322,7 @@
             <button type="button" class="btn btn-ghost" id="btnTestarMP">Testar conexão</button>
             <span id="mpTesteResult" class="teste-result"></span>
           </div>
+          <p class="campo-dica" id="mpEmailAviso" hidden>O Pix do Mercado Pago usa o e-mail da loja — cadastre em Loja e Aparência. Sem ele, o pagamento pode ser recusado.</p>
         </form>
       </section>
 
@@ -322,9 +332,31 @@
         <p class="dica">Pix e cartão online via API do Asaas. As credenciais ficam salvas só no servidor e são mostradas mascaradas — deixe o campo como está para manter a credencial atual.</p>
         <form class="card-form" id="formAsaas">
           <div class="form-row between">
-            <div><strong>Ativar Asaas</strong><div class="dica">Oferece Pix Asaas e Cartão Asaas no checkout.</div></div>
+            <div><strong>Ativar Asaas</strong><div class="dica">Liga o recebimento online por este provedor.</div></div>
             <span class="switch"><input type="checkbox" id="asaasAtivo"><span class="slider"></span></span>
           </div>
+          <div class="form-row between">
+            <div><strong>Pix online (Asaas)</strong><div class="dica">Aparece no checkout do cliente.</div></div>
+            <span class="switch"><input type="checkbox" id="asaasPixOnline"><span class="slider"></span></span>
+          </div>
+          <div class="form-row between">
+            <div><strong>Cartão online (Asaas)</strong><div class="dica">Aparece no checkout do cliente.</div></div>
+            <span class="switch"><input type="checkbox" id="asaasCartaoOnline"><span class="slider"></span></span>
+          </div>
+          <p class="campo-dica">O cliente vê só “Pix online” / “Cartão online” — o nome Asaas não aparece pra ele. Se o Mercado Pago também estiver ligado, o Asaas atende primeiro.</p>
+          <details class="guia">
+            <summary>Como configurar o recebimento no Asaas (passo a passo)</summary>
+            <ol>
+              <li>Entre no <strong>painel do Asaas</strong> (asaas.com) com a conta da loja. Para receber de verdade, a conta precisa estar <strong>verificada</strong> (CPF/CNPJ e dados bancários validados).</li>
+              <li><strong>API Key:</strong> no menu, abra <strong>Integrações → API</strong> e copie a chave. A chave de <strong>produção</strong> só funciona com o ambiente "Produção" aqui; a chave de <strong>sandbox</strong> só funciona com "Sandbox (testes)". Cole no campo "API Key" acima.</li>
+              <li><strong>Webhook:</strong> ainda em <strong>Integrações → Webhooks</strong>, crie um webhook com a <strong>URL do webhook</strong> copiada acima e defina um <strong>token</strong> (uma senha só sua). Cole esse mesmo token no campo "Token do Webhook" acima. Sem ele, os avisos de pagamento são ignorados.</li>
+              <li>No webhook, marque os eventos: <strong>PAYMENT_RECEIVED, PAYMENT_CONFIRMED, PAYMENT_OVERDUE, PAYMENT_REFUNDED</strong> e <strong>PAYMENT_DELETED</strong>. São eles que avisam o sistema quando o cliente paga.</li>
+              <li>Aqui no painel: escolha o ambiente (<strong>Sandbox</strong> para testar, <strong>Produção</strong> para valer), ligue "Ativar Asaas", marque só as formas que o cliente vai ver (Pix e/ou Cartão online) e clique em <strong>Salvar Asaas</strong>.</li>
+              <li>Clique em <strong>Testar conexão</strong>: se responder "Conta conectada", está pronto. Faça um pedido de teste com Pix online e pague: o pedido tem que mudar para pago sozinho quando o Asaas avisar.</li>
+              <li>Dinheiro do Pix e do cartão cai na <strong>conta Asaas</strong> da loja — a transferência para o banco é feita dentro do painel do Asaas (Transferências). O sistema não movimenta dinheiro, só cobra e confirma.</li>
+              <li><strong>Cartão online:</strong> o cliente informa os dados do cartão na página segura do Asaas (o link “Pagar agora”) — nenhum dado de cartão passa pela loja. O Asaas cobra como crédito; cartão de débito com função crédito também funciona.</li>
+            </ol>
+          </details>
           <label>Ambiente
             <select id="asaasAmbiente">
               <option value="sandbox">Sandbox (testes)</option>
@@ -398,6 +430,7 @@
             <label>Pedido mínimo (R$) <input type="text" id="lojaPedidoMinimo" class="money" inputmode="numeric" placeholder="0,00"></label>
             <label>Taxa única de entrega (R$) <input type="text" id="lojaTaxaUnica" class="money" inputmode="numeric" placeholder="Vazio = taxa por bairro"></label>
             <label>Chave Pix exibida no checkout <input type="text" id="lojaChavePix"></label>
+            <label>E-mail da loja (para pagamentos online) <input type="email" id="lojaEmailPedidos" placeholder="O Pix do Mercado Pago usa este e-mail"></label>
             <label>Horário que abre <input type="time" id="lojaAbre"></label>
             <label>Horário que fecha <input type="time" id="lojaFecha"></label>
           </div>

@@ -243,10 +243,17 @@ async function calcular(data) {
 }
 
 // ---------- resumo do relatório (tela + PDF, mesmo dia) ----------
-const FAMILIA_PAGAMENTO = `COALESCE(NULLIF(p.forma_pagamento,''),
-  CASE WHEN p.metodo_pagamento LIKE 'pix%' THEN 'pix'
-       WHEN p.metodo_pagamento LIKE 'cartao%' THEN 'cartao'
-       ELSE 'dinheiro' END)`;
+// 1.16.44: online e presencial são caixas DIFERENTES — o dono precisa ver
+// quanto caiu no Asaas/MP e quanto recebeu na mão. O método interno
+// (pix_asaas, cartao_mp...) e o genérico (pix_online) viram a família
+// online; o código curto (pix, cartao) é o presencial.
+const FAMILIA_PAGAMENTO = `CASE
+  WHEN p.metodo_pagamento IN ('pix_online','pix_asaas','pix_mp') THEN 'pix_online'
+  WHEN p.metodo_pagamento IN ('cartao_online','cartao_asaas','cartao_mp') THEN 'cartao_online'
+  WHEN p.metodo_pagamento = 'pix' THEN 'pix'
+  WHEN p.metodo_pagamento = 'cartao' THEN 'cartao'
+  WHEN p.metodo_pagamento = 'dinheiro' THEN 'dinheiro'
+  ELSE COALESCE(NULLIF(p.forma_pagamento,''), 'dinheiro') END`;
 async function resumoRelatorio(data) {
   const calc = await calcular(data);
   const top_produtos = await all(

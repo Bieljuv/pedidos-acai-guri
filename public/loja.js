@@ -366,13 +366,17 @@ function validarGrupo(g, qtdSel) {
     return null;
   }
   if ((g.minimo || 0) > 0 && qtdSel < g.minimo) return `Escolha pelo menos ${g.minimo} opções.`;
+  // 1.16.39: limite trava o total mesmo com excedente pago (ex.: trufados, até 3).
+  if (g.limite != null && qtdSel > g.limite) return `Escolha no máximo ${g.limite} opções.`;
   return null;
 }
 function dicaGrupo(g) {
   const partes = [];
   if (g.tipo_escolha === 'unica') partes.push(g.obrigatorio ? 'Escolha 1 (obrigatório)' : 'Escolha 1 (opcional)');
   else {
-    if (g.maximo != null) partes.push(`Escolha até ${g.maximo}`);
+    // 1.16.39: o teto que o cliente vê é o limite total; `maximo` é só a cota de inclusos.
+    const teto = g.limite != null ? g.limite : g.maximo;
+    if (teto != null) partes.push(`Escolha até ${teto}`);
     if ((g.minimo || 0) > 0) partes.push(`mínimo ${g.minimo}`);
     if (g.obrigatorio && (g.minimo || 0) === 0) partes.push('obrigatório');
     if (g.excedente_vira_pago && g.maximo != null && (g.preco_excedente_centavos || 0) > 0)
@@ -724,8 +728,9 @@ function renderGruposMontador() {
     div.className = 'grupo';
     div.id = 'grupo-' + g.id;
     const contSel = qtdSelecionadas(g.id);
-    const contador = g.tipo_escolha === 'multipla' && g.maximo != null
-      ? `${contSel}/${g.maximo}` : (contSel ? `${contSel} selecionado(s)` : '');
+    const tetoCont = g.limite != null ? g.limite : g.maximo;
+    const contador = g.tipo_escolha === 'multipla' && tetoCont != null
+      ? `${contSel}/${tetoCont}` : (contSel ? `${contSel} selecionado(s)` : '');
     div.innerHTML = `
       <div class="grupo-topo">
         <span class="grupo-nome">${esc(g.nome)}</span>
@@ -734,8 +739,9 @@ function renderGruposMontador() {
       <p class="grupo-dica">${esc(dicaGrupo(g))}</p>
       <p class="grupo-erro" hidden></p>`;
     const ops = (g.opcoes || []).slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
-    const noLimite = g.tipo_escolha === 'multipla' && !g.excedente_vira_pago &&
-      g.maximo != null && contSel >= g.maximo;
+    const noLimite = g.tipo_escolha === 'multipla' &&
+      ((g.limite != null && contSel >= g.limite) ||
+        (!g.excedente_vira_pago && g.maximo != null && contSel >= g.maximo));
     const cotaGrupo = (g.tipo_escolha === 'multipla' && g.excedente_vira_pago && g.maximo != null)
       ? g.maximo : null;
     const idsGrupo = new Set(ops.map((x) => x.id));
@@ -782,6 +788,11 @@ function alternarOpcao(g, o) {
   } else {
     if (sel.has(o.id)) sel.delete(o.id);
     else {
+      // 1.16.39: o limite trava a escolha mesmo com excedente pago.
+      if (g.limite != null && qtdSelecionadas(g.id) >= g.limite) {
+        toast(`Máximo de ${g.limite} neste grupo.`);
+        return;
+      }
       if (!g.excedente_vira_pago && g.maximo != null && qtdSelecionadas(g.id) >= g.maximo) {
         toast(`Máximo de ${g.maximo} neste grupo.`);
         return;

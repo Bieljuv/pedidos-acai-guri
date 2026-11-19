@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS grupos_opcoes (
   nome TEXT NOT NULL, tipo_escolha TEXT NOT NULL DEFAULT 'multipla',
   minimo INTEGER DEFAULT 0, maximo INTEGER,
   obrigatorio INTEGER DEFAULT 0, excedente_vira_pago INTEGER DEFAULT 0,
-  preco_excedente_centavos INTEGER DEFAULT 0, ativo INTEGER DEFAULT 1, ordem INTEGER DEFAULT 0
+  preco_excedente_centavos INTEGER DEFAULT 0, ativo INTEGER DEFAULT 1, ordem INTEGER DEFAULT 0,
+  limite INTEGER
 );
 CREATE TABLE IF NOT EXISTS opcoes (
   id INTEGER PRIMARY KEY AUTOINCREMENT, grupo_id INTEGER NOT NULL,
@@ -429,28 +430,38 @@ function seedSqlite() {
 
     const cat = sq.prepare('INSERT INTO categorias (loja_id, nome, ordem) VALUES (1, ?, ?)');
     const c1 = cat.run('Monte seu Açaí', 1).lastInsertRowid;
-    const c2 = cat.run('Combos', 2).lastInsertRowid;
+    const cTruf = cat.run('Trufados', 2).lastInsertRowid;
+    const c2 = cat.run('Combos', 3).lastInsertRowid;
 
-    const grp = sq.prepare(`INSERT INTO grupos_opcoes (loja_id, nome, tipo_escolha, minimo, maximo, obrigatorio, excedente_vira_pago, preco_excedente_centavos, ordem)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    const gTam = grp.run('Tamanho', 'unica', 1, 1, 1, 0, 0, 1).lastInsertRowid;
+    const grp = sq.prepare(`INSERT INTO grupos_opcoes (loja_id, nome, tipo_escolha, minimo, maximo, obrigatorio, excedente_vira_pago, preco_excedente_centavos, ordem, limite)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const gTam = grp.run('Tamanho', 'unica', 1, 1, 1, 0, 0, 1, null).lastInsertRowid;
     // 2 acompanhamentos inclusos (maximo=2); daí pra frente, R$ 3,00 por extra.
-    const gAcomp = grp.run('Acompanhamentos e coberturas', 'multipla', 0, 2, 0, 1, 300, 2).lastInsertRowid;
+    const gAcomp = grp.run('Acompanhamentos e coberturas', 'multipla', 0, 2, 0, 1, 300, 2, null).lastInsertRowid;
+    // 1.16.39 — Trufados: 1 sabor incluso (maximo=1), cada sabor extra
+    // + R$ 5,00 (excedente), travado em 3 sabores (limite=3). Preço final:
+    // 300ml R$ 20/25/30 e 500ml R$ 30/35/40, conforme a tabela do Guri.
+    const gTruf = grp.run('Sabores trufados', 'multipla', 1, 1, 1, 1, 500, 1, 3).lastInsertRowid;
 
     const opc = sq.prepare('INSERT INTO opcoes (grupo_id, nome, preco_adicional_centavos, ordem) VALUES (?, ?, ?, ?)');
     opc.run(gTam, '250ml', 1599, 1); opc.run(gTam, '500ml', 2599, 2);
     ['Banana', 'Granola', 'Leite condensado', 'Paçoca', 'Creme de Ninho', 'Morango', 'Leite em pó', 'Confetes', 'Creme de avelã', 'Ovomaltine']
       .forEach((n, i) => opc.run(gAcomp, n, 0, i + 1));
+    ['Guri Doce – Mousse de chocolate', 'Guri Relax – Mousse de maracujá', 'Guri de Apartamento – Mousse de morango', 'Guri Dois Amores – Creme de chocolate com avelã e Ninho', 'Guri Campeiro – Creme de amendoim', 'Guri Bueno – Creme Kinder', 'Guri Ferrero – Creme de avelã, leite em pó e amendoim', 'Guri Serrano – Doce de leite']
+      .forEach((n, i) => opc.run(gTruf, n, 0, i + 1));
 
     const prod = sq.prepare(`INSERT INTO produtos (loja_id, categoria_id, nome, descricao, preco_base_centavos, tipo, destaque, ordem)
       VALUES (1, ?, ?, ?, ?, ?, ?, ?)`);
     const p1 = prod.run(c1, 'Monte seu Açaí', 'Escolha o tamanho e os acompanhamentos do seu jeito: 2 acompanhamentos inclusos, extras por R$ 3,00 cada.', 0, 'montavel', 1, 1).lastInsertRowid;
+    const pT300 = prod.run(cTruf, 'Açaí Trufado 300ml', 'Açaí com sabores trufados: escolha até 3 sabores. 1 sabor incluso, cada sabor extra + R$ 5,00.', 2000, 'montavel', 0, 1).lastInsertRowid;
+    const pT500 = prod.run(cTruf, 'Açaí Trufado 500ml', 'Açaí com sabores trufados: escolha até 3 sabores. 1 sabor incluso, cada sabor extra + R$ 5,00.', 3000, 'montavel', 0, 2).lastInsertRowid;
     prod.run(c2, 'Gurizinho', '', 3500, 'simples', 0, 1);
     prod.run(c2, 'Guri e Guria', '', 4000, 'simples', 0, 2);
     prod.run(c2, 'Guri Bão', '', 5500, 'simples', 0, 3);
 
     const pg = sq.prepare('INSERT INTO produto_grupos (produto_id, grupo_id, ordem) VALUES (?, ?, ?)');
     pg.run(p1, gTam, 1); pg.run(p1, gAcomp, 2);
+    pg.run(pT300, gTruf, 1); pg.run(pT500, gTruf, 1);
 
     // Entrega em Balneário Camboriú e Camboriú com taxa "a consultar":
     // nenhum bairro cadastrado e taxa_unica NULL → o checkout mostra
@@ -482,27 +493,35 @@ async function seedPg() {
 
     const cat = 'INSERT INTO categorias (loja_id, nome, ordem) VALUES (1, ?, ?)';
     const c1 = Number((await q.run(cat, 'Monte seu Açaí', 1)).lastInsertRowid);
-    const c2 = Number((await q.run(cat, 'Combos', 2)).lastInsertRowid);
+    const cTruf = Number((await q.run(cat, 'Trufados', 2)).lastInsertRowid);
+    const c2 = Number((await q.run(cat, 'Combos', 3)).lastInsertRowid);
 
-    const grp = `INSERT INTO grupos_opcoes (loja_id, nome, tipo_escolha, minimo, maximo, obrigatorio, excedente_vira_pago, preco_excedente_centavos, ordem)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`;
-    const gTam = Number((await q.run(grp, 'Tamanho', 'unica', 1, 1, 1, 0, 0, 1)).lastInsertRowid);
-    const gAcomp = Number((await q.run(grp, 'Acompanhamentos e coberturas', 'multipla', 0, 2, 0, 1, 300, 2)).lastInsertRowid);
+    const grp = `INSERT INTO grupos_opcoes (loja_id, nome, tipo_escolha, minimo, maximo, obrigatorio, excedente_vira_pago, preco_excedente_centavos, ordem, limite)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const gTam = Number((await q.run(grp, 'Tamanho', 'unica', 1, 1, 1, 0, 0, 1, null)).lastInsertRowid);
+    const gAcomp = Number((await q.run(grp, 'Acompanhamentos e coberturas', 'multipla', 0, 2, 0, 1, 300, 2, null)).lastInsertRowid);
+    // 1.16.39 — Trufados (mesma regra do seed SQLite): 1 incluso, +R$ 5,00 por extra, até 3.
+    const gTruf = Number((await q.run(grp, 'Sabores trufados', 'multipla', 1, 1, 1, 1, 500, 1, 3)).lastInsertRowid);
 
     const opc = 'INSERT INTO opcoes (grupo_id, nome, preco_adicional_centavos, ordem) VALUES (?, ?, ?, ?)';
     await q.run(opc, gTam, '250ml', 1599, 1); await q.run(opc, gTam, '500ml', 2599, 2);
     const acomp = ['Banana', 'Granola', 'Leite condensado', 'Paçoca', 'Creme de Ninho', 'Morango', 'Leite em pó', 'Confetes', 'Creme de avelã', 'Ovomaltine'];
     for (let i = 0; i < acomp.length; i++) await q.run(opc, gAcomp, acomp[i], 0, i + 1);
+    const truf = ['Guri Doce – Mousse de chocolate', 'Guri Relax – Mousse de maracujá', 'Guri de Apartamento – Mousse de morango', 'Guri Dois Amores – Creme de chocolate com avelã e Ninho', 'Guri Campeiro – Creme de amendoim', 'Guri Bueno – Creme Kinder', 'Guri Ferrero – Creme de avelã, leite em pó e amendoim', 'Guri Serrano – Doce de leite'];
+    for (let i = 0; i < truf.length; i++) await q.run(opc, gTruf, truf[i], 0, i + 1);
 
     const prod = `INSERT INTO produtos (loja_id, categoria_id, nome, descricao, preco_base_centavos, tipo, destaque, ordem)
       VALUES (1, ?, ?, ?, ?, ?, ?, ?)`;
     const p1 = Number((await q.run(prod, c1, 'Monte seu Açaí', 'Escolha o tamanho e os acompanhamentos do seu jeito: 2 acompanhamentos inclusos, extras por R$ 3,00 cada.', 0, 'montavel', 1, 1)).lastInsertRowid);
+    const pT300 = Number((await q.run(prod, cTruf, 'Açaí Trufado 300ml', 'Açaí com sabores trufados: escolha até 3 sabores. 1 sabor incluso, cada sabor extra + R$ 5,00.', 2000, 'montavel', 0, 1)).lastInsertRowid);
+    const pT500 = Number((await q.run(prod, cTruf, 'Açaí Trufado 500ml', 'Açaí com sabores trufados: escolha até 3 sabores. 1 sabor incluso, cada sabor extra + R$ 5,00.', 3000, 'montavel', 0, 2)).lastInsertRowid);
     await q.run(prod, c2, 'Gurizinho', '', 3500, 'simples', 0, 1);
     await q.run(prod, c2, 'Guri e Guria', '', 4000, 'simples', 0, 2);
     await q.run(prod, c2, 'Guri Bão', '', 5500, 'simples', 0, 3);
 
     const pg = 'INSERT INTO produto_grupos (produto_id, grupo_id, ordem) VALUES (?, ?, ?)';
     await q.run(pg, p1, gTam, 1); await q.run(pg, p1, gAcomp, 2);
+    await q.run(pg, pT300, gTruf, 1); await q.run(pg, pT500, gTruf, 1);
 
     // Entrega "a consultar": sem bairros e sem taxa_unica (ver seedSqlite).
 
@@ -564,6 +583,9 @@ async function init() {
   await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS externo_id TEXT');
   await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cupom_codigo TEXT');
   await pool.query('ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS desconto_centavos INTEGER DEFAULT 0');
+  // 1.16.39: trava total de escolhas do grupo (linha Trufados: até 3 sabores
+  // mesmo com excedente pago — o `maximo` sozinho não trava nesse caso).
+  await pool.query('ALTER TABLE grupos_opcoes ADD COLUMN IF NOT EXISTS limite INTEGER');
   console.log('[banco] Modo SUPABASE: conectado no Postgres da DATABASE_URL.');
   if (await seed()) console.log('[banco] Postgres vazio — seed inicial aplicado (loja de exemplo + admin/admin123).');
 }

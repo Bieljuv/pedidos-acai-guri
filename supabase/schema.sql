@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS grupos_opcoes (
   nome TEXT NOT NULL, tipo_escolha TEXT NOT NULL DEFAULT 'multipla',
   minimo INTEGER DEFAULT 0, maximo INTEGER,
   obrigatorio INTEGER DEFAULT 0, excedente_vira_pago INTEGER DEFAULT 0,
-  preco_excedente_centavos INTEGER DEFAULT 0, ativo INTEGER DEFAULT 1, ordem INTEGER DEFAULT 0
+  preco_excedente_centavos INTEGER DEFAULT 0, ativo INTEGER DEFAULT 1, ordem INTEGER DEFAULT 0,
+  limite INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS opcoes (

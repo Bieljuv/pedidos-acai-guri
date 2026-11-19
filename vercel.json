@@ -20,5 +20,15 @@
       "destination": "/api/index.js",
       "source": "/"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/keepalive",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/keepalive",
+      "schedule": "0 0 * * *"
+    }
   ]
 }

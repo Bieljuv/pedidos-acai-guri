@@ -1235,7 +1235,7 @@ function renderGrupos() {
       <div class="grupo-head">
         <div>
           <div class="grupo-nome">${esc(g.nome)} ${ativoDe(g) ? '' : '<span class="tag esgotado">inativo</span>'}</div>
-          <div class="grupo-meta">${g.tipo_escolha === 'unica' ? 'Escolha única' : 'Múltipla'} · mín ${g.minimo || 0}${g.maximo ? ' · máx ' + g.maximo : ' · sem limite'} · ${g.obrigatorio ? 'obrigatório' : 'opcional'}${g.excedente_vira_pago ? ` · excedente pago (${fmtBRL(g.preco_excedente_centavos)} cada)` : ''} · ordem ${g.ordem || 0}</div>
+          <div class="grupo-meta">${g.tipo_escolha === 'unica' ? 'Escolha única' : 'Múltipla'} · mín ${g.minimo || 0}${g.maximo ? ' · máx ' + g.maximo : ' · sem limite'}${g.limite != null ? ' · limite total ' + g.limite : ''} · ${g.obrigatorio ? 'obrigatório' : 'opcional'}${g.excedente_vira_pago ? ` · excedente pago (${fmtBRL(g.preco_excedente_centavos)} cada)` : ''} · ordem ${g.ordem || 0}</div>
         </div>
         <div style="display:flex;gap:.4rem">
           <button class="btn btn-ghost btn-sm adm-only" data-grupo-edit="${g.id}">Editar grupo</button>
@@ -1307,7 +1307,7 @@ function renderGrupos() {
 }
 function modalGrupo(g) {
   const edit = !!g;
-  g = g || { nome:'', tipo_escolha:'multipla', minimo:0, maximo:null, obrigatorio:false, excedente_vira_pago:false, preco_excedente_centavos:0, ativo:true, ordem:0 };
+  g = g || { nome:'', tipo_escolha:'multipla', minimo:0, maximo:null, obrigatorio:false, excedente_vira_pago:false, preco_excedente_centavos:0, ativo:true, ordem:0, limite:null };
   const body = openModal(edit ? 'Editar grupo' : 'Novo grupo', `
     <form id="formGrupo">
       <label>Nome do grupo <input type="text" id="grNome" value="${esc(g.nome)}" placeholder="Ex.: Tamanho, Acompanhamentos, Calda" required></label>
@@ -1321,6 +1321,7 @@ function modalGrupo(g) {
         <label>Ordem <input type="number" id="grOrdem" value="${g.ordem || 0}"></label>
         <label>Mínimo de escolhas <input type="number" id="grMin" min="0" value="${g.minimo || 0}"></label>
         <label>Máximo de escolhas <input type="number" id="grMax" min="0" value="${g.maximo ?? ''}" placeholder="Vazio = sem limite"></label>
+        <label>Limite total de escolhas <input type="number" id="grLimite" min="0" value="${g.limite ?? ''}" placeholder="Vazio = sem trava"></label>
       </div>
       <label>Preço do excedente (R$) <input type="text" class="money" id="grPrecoExc" inputmode="numeric" placeholder="0,00"></label>
       <div class="form-row" style="display:flex;gap:1.2rem;flex-wrap:wrap">
@@ -1328,18 +1329,20 @@ function modalGrupo(g) {
         <label class="chk"><input type="checkbox" id="grExcPago" ${g.excedente_vira_pago ? 'checked' : ''}> Excedente vira pago</label>
         <label class="chk"><input type="checkbox" id="grAtivo" ${ativoDe(g) ? 'checked' : ''}> Ativo</label>
       </div>
-      <p class="dica">Ex.: "Acompanhamentos inclusos (até 3)": múltipla, máx 3, excedente pago desligado (trava em 3) — ou ligado com preço se quiser cobrar cada extra.</p>
+      <p class="dica">Ex.: "Acompanhamentos inclusos (até 3)": múltipla, máx 3, excedente pago desligado (trava em 3) — ou ligado com preço se quiser cobrar cada extra. Com excedente pago, o "máx" vira só a cota de inclusos: pra travar o total, use o limite total (ex.: trufados — máx 1 incluso, excedente R$ 5,00 e limite total 3).</p>
       <div class="form-actions"><button class="btn btn-primary" type="submit">Salvar grupo</button></div>
     </form>`);
   setMoney($('#grPrecoExc', body), g.preco_excedente_centavos || 0);
   $('#formGrupo', body).addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const maxVal = $('#grMax', body).value;
+    const limVal = $('#grLimite', body).value;
     const payload = {
       nome: $('#grNome', body).value.trim(),
       tipo_escolha: $('#grTipo', body).value,
       minimo: Number($('#grMin', body).value) || 0,
       maximo: maxVal === '' ? null : Number(maxVal),
+      limite: limVal === '' ? null : Number(limVal),
       obrigatorio: $('#grObrig', body).checked,
       excedente_vira_pago: $('#grExcPago', body).checked,
       preco_excedente_centavos: getMoney($('#grPrecoExc', body)) || 0,

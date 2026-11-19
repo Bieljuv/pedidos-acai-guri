@@ -52,7 +52,7 @@ async function montarCardapio() {
     (gruposPorProduto[g.produto_id] = gruposPorProduto[g.produto_id] || []).push({
       id: g.id, nome: g.nome, tipo_escolha: g.tipo_escolha, minimo: g.minimo, maximo: g.maximo,
       obrigatorio: !!g.obrigatorio, excedente_vira_pago: !!g.excedente_vira_pago,
-      preco_excedente_centavos: g.preco_excedente_centavos, ordem: g.ordem, opcoes,
+      preco_excedente_centavos: g.preco_excedente_centavos, ordem: g.ordem, limite: g.limite, opcoes,
     });
   }
   return {
@@ -99,6 +99,11 @@ async function precificarItem(item) {
       for (const o of doGrupo) { unit += o.preco_adicional_centavos; snapshot.push({ grupo_nome: g.nome, opcao_nome: o.nome, preco: o.preco_adicional_centavos, excedente: 0 }); }
     } else { // multipla
       if (doGrupo.length < minExigido) throw new Error(`Escolha pelo menos ${minExigido} em "${g.nome}".`);
+      // 1.16.39: limite trava o TOTAL de escolhas mesmo com excedente pago
+      // (o `maximo` sozinho vira só a cota de inclusos nesse caso).
+      if (g.limite != null && doGrupo.length > g.limite) {
+        throw new Error(`Em "${g.nome}" você pode escolher no máximo ${g.limite}.`);
+      }
       if (g.maximo != null && doGrupo.length > g.maximo && !g.excedente_vira_pago) {
         throw new Error(`Em "${g.nome}" você pode escolher no máximo ${g.maximo}.`);
       }

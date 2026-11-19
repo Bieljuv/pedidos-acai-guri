@@ -182,6 +182,16 @@ app.get('/tema.css', h(async (req, res) => {
   res.send(tema.cssDoTema(loja && loja.cor_primaria, loja && loja.cor_destaque));
 }));
 
+// 1.16.40 — keep-alive do Supabase: o plano grátis pausa o projeto após
+// 7 dias sem consulta no banco. A Vercel chama este endpoint 2x/dia pelo
+// cron (vercel.json); cada chamada é 1 consulta real no banco. Sem auth
+// de propósito (o cron da Vercel não manda token) e sem dado sensível:
+// só prova que o banco responde. Se o banco cair, volta 500.
+app.get('/api/keepalive', h(async (req, res) => {
+  await get('SELECT 1 AS um');
+  res.json({ ok: true });
+}));
+
 app.get('/api/public/loja', h(async (req, res) => {
   const loja = await pedidosCore.getLoja();
   const estado = util.lojaEstaAberta(loja);
@@ -537,7 +547,7 @@ app.post('/api/painel/pedidos/:id/imprimir', auth, h(async (req, res) => {
 const CRUD = {
   categorias: { tabela: 'categorias', campos: ['nome', 'ordem', 'ativa'], numericos: ['ordem', 'ativa'], ordemLista: 'ordem, id', colunaAtivo: 'ativa' },
   produtos: { tabela: 'produtos', campos: ['categoria_id', 'nome', 'descricao', 'foto_url', 'preco_base_centavos', 'tipo', 'destaque', 'ativo', 'esgotado', 'ordem'], numericos: ['categoria_id', 'preco_base_centavos', 'destaque', 'ativo', 'esgotado', 'ordem'], ordemLista: 'ordem, id', colunaAtivo: 'ativo' },
-  grupos: { tabela: 'grupos_opcoes', campos: ['nome', 'tipo_escolha', 'minimo', 'maximo', 'obrigatorio', 'excedente_vira_pago', 'preco_excedente_centavos', 'ativo', 'ordem'], numericos: ['minimo', 'maximo', 'obrigatorio', 'excedente_vira_pago', 'preco_excedente_centavos', 'ativo', 'ordem'], ordemLista: 'ordem, id', colunaAtivo: 'ativo' },
+  grupos: { tabela: 'grupos_opcoes', campos: ['nome', 'tipo_escolha', 'minimo', 'maximo', 'obrigatorio', 'excedente_vira_pago', 'preco_excedente_centavos', 'ativo', 'ordem', 'limite'], numericos: ['minimo', 'maximo', 'obrigatorio', 'excedente_vira_pago', 'preco_excedente_centavos', 'ativo', 'ordem', 'limite'], ordemLista: 'ordem, id', colunaAtivo: 'ativo' },
   opcoes: { tabela: 'opcoes', campos: ['grupo_id', 'nome', 'preco_adicional_centavos', 'ativa', 'esgotada', 'ordem'], numericos: ['grupo_id', 'preco_adicional_centavos', 'ativa', 'esgotada', 'ordem'], semLoja: true, ordemLista: 'grupo_id, ordem, id', colunaAtivo: 'ativa' },
   bairros: { tabela: 'bairros', campos: ['bairro', 'taxa_centavos', 'repasse_motoboy_centavos', 'ativo'], numericos: ['taxa_centavos', 'repasse_motoboy_centavos', 'ativo'], ordemLista: 'bairro, id', colunaAtivo: 'ativo' },
 };

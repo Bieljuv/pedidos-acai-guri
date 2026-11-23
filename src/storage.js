@@ -33,6 +33,15 @@ function ehImagem(buffer) {
 
 async function salvarArquivo(buffer, originalName, mimetype) {
   if (!ehImagem(buffer)) throw new Error('O arquivo não é uma imagem válida (use JPG, PNG, WEBP, GIF ou AVIF).');
+  // 1.16.45: tenta otimizar a foto antes de guardar — se não der (sharp
+  // ausente ou imagem que ele não lê), segue com o original. O upload
+  // nunca trava por causa da otimização.
+  const otimizado = await otimizarImagem(buffer);
+  if (otimizado && otimizado.length < buffer.length) {
+    buffer = otimizado;
+    mimetype = 'image/webp';
+    originalName = String(originalName || 'foto').replace(/\.[^.]*$/, '') + '.webp';
+  }
   const nome = nomeArquivo(originalName);
   if (driver() === 'supabase') {
     if (!supabaseConfigurado()) throw new Error('STORAGE_DRIVER=supabase mas SUPABASE_URL/SUPABASE_SERVICE_KEY/SUPABASE_BUCKET não estão configurados.');
@@ -54,6 +63,20 @@ async function salvarArquivo(buffer, originalName, mimetype) {
   // local (padrão)
   fs.writeFileSync(path.join(UPLOAD_DIR, nome), buffer);
   return { url: '/uploads/' + nome };
+}
+
+// 1.16.45: otimiza a foto no upload — gira conforme o EXIF (foto de
+// celular), redimensiona pra no máx. 1200px no lado maior (sem ampliar
+// foto pequena) e converte pra WebP (qualidade 80). Uma foto de celular
+// (2–4 MB) vira 50–150 KB, e o cardápio passa a servir a foto pequena
+// pra todo cliente. Sem metadados (tira EXIF/GPS). GIF animado vira
+// WebP estático (1º quadro). Devolve null se não conseguir otimizar.
+async function otimizarImagem(buffer) {
+  let sharp;
+  try { sharp = require('sharp'); } catch { return null; }
+  try {
+    return await sharp(buffer).rotate().resize(1200, 1200, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+  } catch { return null; }
 }
 
 module.exports = { salvarArquivo, driver, supabaseConfigurado, UPLOAD_DIR, ehImagem };

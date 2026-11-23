@@ -80,8 +80,13 @@ $('#btnPushTeste').addEventListener('click', async () => {
 });
 
 /* ---------- Sons ---------- */
+// 1.16.45: preload 'none' — antes os dois MP3 (~232 KB) baixavam em toda
+// abertura da tela do motoboy. Agora só baixam no primeiro toque (quando
+// o som é destravado) — o play() busca o arquivo na hora.
 const somRec = new Audio('/sons/alerta-sis.mp3');
+somRec.preload = 'none';
 const somSaiu = new Audio('/sons/moto.mp3');
+somSaiu.preload = 'none';
 let audioOk = false;
 document.addEventListener('pointerdown', () => {
   if (audioOk) return;

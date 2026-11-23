@@ -30,5 +30,25 @@
       "path": "/api/keepalive",
       "schedule": "0 0 * * *"
     }
+  ],
+  "headers": [
+    {
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ],
+      "source": "/sons/(.*)"
+    },
+    {
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ],
+      "source": "/img/(.*)"
+    }
   ]
 }

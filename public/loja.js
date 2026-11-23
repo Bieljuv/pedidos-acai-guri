@@ -1372,9 +1372,13 @@ let intervaloAcomp = 5000; // 1.16.44: 5s até o pagamento confirmar, 30s depois
    toque. O cliente pode desligar no alto-falante do proprio cartao; a
    escolha fica salva no aparelho. Nada aqui pode quebrar a tela:
    tudo em try/catch. */
+/* 1.16.45: preload 'none' — antes os dois MP3 (~192 KB) baixavam em
+   TODA abertura da loja, mesmo que o pedido nunca mudasse de status.
+   Agora só baixam no primeiro toque do cliente (quando o som é
+   destravado) — o play() busca o arquivo na hora. */
 const SONS_ACOMP = {
-  partida: (() => { try { const a = new Audio('/sons/moto.mp3'); a.preload = 'auto'; return a; } catch { return null; } })(),
-  buzina: (() => { try { const a = new Audio('/sons/buzina.mp3'); a.preload = 'auto'; return a; } catch { return null; } })(),
+  partida: (() => { try { const a = new Audio('/sons/moto.mp3'); a.preload = 'none'; return a; } catch { return null; } })(),
+  buzina: (() => { try { const a = new Audio('/sons/buzina.mp3'); a.preload = 'none'; return a; } catch { return null; } })(),
 };
 let somDestravado = false;
 let somPendente = null; // { tipo, quando }

@@ -1092,22 +1092,22 @@ function ativoDe(x) { return x.ativo === undefined ? true : !!x.ativo; }
 
 function renderCategorias() {
   $('#categoriasList').innerHTML = state.categorias.map(c => `
-    <span class="cat-chip ${ativoDe(c) ? '' : 'inativa'}">${esc(c.nome)}
+    <span class="cat-chip ${(c.ativa === undefined ? true : !!c.ativa) ? '' : 'inativa'}">${esc(c.nome)}
       <button class="mini adm-only" data-cat-edit="${c.id}">Editar</button>
-      <button class="mini adm-only" data-cat-del="${c.id}">${ativoDe(c) ? 'Inativar' : 'Reativar'}</button>
+      <button class="mini adm-only" data-cat-del="${c.id}">${(c.ativa === undefined ? true : !!c.ativa) ? 'Inativar' : 'Reativar'}</button>
     </span>`).join('') || '<span class="dica">Nenhuma categoria ainda.</span>';
   $$('#categoriasList [data-cat-edit]').forEach(b => b.addEventListener('click', () => modalCategoria(state.categorias.find(c => String(c.id) === b.dataset.catEdit))));
   $$('#categoriasList [data-cat-del]').forEach(b => b.addEventListener('click', async () => {
     const c = state.categorias.find(x => String(x.id) === b.dataset.catDel);
     try {
-      if (ativoDe(c)) { await api('/api/painel/categorias/' + c.id, { method: 'DELETE' }); toast('Categoria inativada.'); }
-      else { await api('/api/painel/categorias/' + c.id, { method: 'PUT', body: { nome: c.nome, ordem: c.ordem, ativo: true } }); toast('Categoria reativada.'); }
+      if (c.ativa === undefined ? true : !!c.ativa) { await api('/api/painel/categorias/' + c.id, { method: 'DELETE' }); toast('Categoria inativada.'); }
+      else { await api('/api/painel/categorias/' + c.id, { method: 'PUT', body: { nome: c.nome, ordem: c.ordem, ativa: true } }); toast('Categoria reativada.'); }
       carregarCardapio();
     } catch (err) { toast(err.message, true); }
   }));
 }
 function modalCategoria(cat) {
-  const edit = !!cat; cat = cat || { nome: '', ordem: 0, ativo: true };
+  const edit = !!cat; cat = cat || { nome: '', ordem: 0, ativa: true };
   const body = openModal(edit ? 'Editar categoria' : 'Nova categoria', `
     <form id="formCat">
       <label>Nome <input type="text" id="catNome" value="${esc(cat.nome)}" required></label>
@@ -1116,7 +1116,7 @@ function modalCategoria(cat) {
     </form>`);
   $('#formCat', body).addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const payload = { nome: $('#catNome', body).value.trim(), ordem: Number($('#catOrdem', body).value) || 0, ativo: ativoDe(cat) };
+    const payload = { nome: $('#catNome', body).value.trim(), ordem: Number($('#catOrdem', body).value) || 0, ativa: (cat.ativa === undefined ? true : !!cat.ativa) };
     try {
       if (edit) await api('/api/painel/categorias/' + cat.id, { method: 'PUT', body: payload });
       else await api('/api/painel/categorias', { method: 'POST', body: payload });
@@ -1290,7 +1290,7 @@ function renderGrupos() {
           <td><input type="checkbox" data-op-esgotada="${o.id}" ${o.esgotada ? 'checked' : ''}></td>
           <td style="white-space:nowrap">
             <button class="btn btn-ghost btn-sm adm-only" data-op-edit="${o.id}">Editar</button>
-            <button class="btn btn-ghost btn-sm adm-only" data-op-del="${o.id}">Inativar</button>
+            <button class="btn btn-ghost btn-sm adm-only" data-op-del="${o.id}">${(o.ativa === undefined ? true : !!o.ativa) ? 'Inativar' : 'Reativar'}</button>
           </td></tr>`).join('') || '<tr><td colspan="6" class="dica">Nenhuma opção neste grupo ainda.</td></tr>'}
         </tbody>
       </table>
@@ -1315,7 +1315,12 @@ function renderGrupos() {
   const todasOpcoes = () => Object.values(state.opcoesPorGrupo).flat();
   $$('#gruposList [data-op-edit]').forEach(b => b.addEventListener('click', () => modalOpcao(todasOpcoes().find(o => String(o.id) === b.dataset.opEdit))));
   $$('#gruposList [data-op-del]').forEach(b => b.addEventListener('click', async () => {
-    try { await api('/api/painel/opcoes/' + b.dataset.opDel, { method: 'DELETE' }); toast('Opção inativada.'); carregarGrupos(); }
+    const o = todasOpcoes().find(x => String(x.id) === b.dataset.opDel);
+    try {
+      if (o.ativa === undefined ? true : !!o.ativa) { await api('/api/painel/opcoes/' + o.id, { method: 'DELETE' }); toast('Opção inativada.'); }
+      else { await api('/api/painel/opcoes/' + o.id, { method: 'PUT', body: { ...o, ativa: true } }); toast('Opção reativada.'); }
+      carregarGrupos();
+    }
     catch (err) { toast(err.message, true); }
   }));
   $$('#gruposList [data-op-ativa]').forEach(chk => chk.addEventListener('change', async () => {

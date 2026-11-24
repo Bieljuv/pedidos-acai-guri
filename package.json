@@ -7,7 +7,7 @@
     "sharp": "^0.35.5",
     "web-push": "^3.6.7"
   },
-  "description": "Sistema de pedidos online — Açaí do Guri (servidor local)",
+  "description": "Sistema de pedidos online \u2014 A\u00e7a\u00ed do Guri (servidor local)",
   "engines": {
     "node": ">=22"
   },
@@ -19,5 +19,5 @@
     "dev": "node server.js"
   },
   "type": "commonjs",
-  "version": "1.16.45"
+  "version": "1.16.46"
 }
